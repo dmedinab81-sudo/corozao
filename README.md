@@ -1,2 +1,2 @@
 # corozao
-Sistema de Inventario Facturación Corazao
+Sistema de Inventario Facturación Corozao
