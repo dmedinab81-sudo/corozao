@@ -1,0 +1,12 @@
+# Secretos y configuración privada
+.env
+.env.*
+!.env.example
+
+# Registros y archivos temporales
+*.log
+*.tmp
+*.bak
+
+# Dependencias
+/vendor/
