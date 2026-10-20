@@ -19,12 +19,6 @@ header('X-Frame-Options: DENY');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Cache-Control: no-store, private');
 
-$usuarioId = filter_var($_SESSION['usuario_id'] ?? null, FILTER_VALIDATE_INT);
-if (!$usuarioId || ($_SESSION['rol'] ?? '') !== 'ADMINISTRADOR') {
-    http_response_code(isset($_SESSION['usuario_id']) ? 403 : 401);
-    exit('Se requiere una sesión de administrador activa.');
-}
-
 if (!isset($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
@@ -90,17 +84,9 @@ function registrarAuditoria(
 }
 
 require '/etc/corozao/database.php';
-
-// La sesión debe pertenecer a una cuenta que siga activa y con rol administrador.
-$stmt = $pdo->prepare(
-    'SELECT rol, activo FROM usuarios WHERE usuario_id = :usuario LIMIT 1'
-);
-$stmt->execute(['usuario' => $usuarioId]);
-$usuarioActual = $stmt->fetch();
-if (!$usuarioActual || (int) $usuarioActual['activo'] !== 1 || $usuarioActual['rol'] !== 'ADMINISTRADOR') {
-    http_response_code(403);
-    exit('La cuenta no tiene permisos para administrar proveedores.');
-}
+require_once __DIR__ . '/includes/autorizacion.php';
+$usuarioActual = corozao_exigir_permiso($pdo, 'suppliers.view');
+$usuarioId = (int) $usuarioActual['usuario_id'];
 
 $stmt = $pdo->prepare(
     'SELECT COUNT(*) FROM information_schema.TABLES
@@ -161,18 +147,33 @@ $historial = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $tokenRecibido = $_POST['csrf_token'] ?? '';
-    if (!is_string($tokenRecibido) || !hash_equals($csrfToken, $tokenRecibido)) {
+    if (!is_string($tokenRecibido) || !corozao_csrf_valido($tokenRecibido)) {
         http_response_code(403);
         $errorGeneral = 'La solicitud expiró. Recarga la página e inténtalo nuevamente.';
     } elseif (!$auditoriaDisponible) {
         http_response_code(503);
-        $errorGeneral = 'Las escrituras están pausadas hasta aplicar la migración de auditoría. No se guardaron cambios.';
+        $errorGeneral = 'La auditoría no está disponible. No se guardaron cambios.';
     } else {
         $accionPost = $_POST['accion'] ?? '';
         $accionPost = is_string($accionPost) ? $accionPost : '';
 
+        $permisoAccion = match ($accionPost) {
+            'guardar' => !empty($_POST['proveedor_id']) ? 'suppliers.update' : 'suppliers.create',
+            'desactivar' => 'suppliers.deactivate',
+            'relacionar' => 'suppliers.link_products',
+            default => null,
+        };
+        if ($permisoAccion === null) {
+            http_response_code(403);
+            $errorGeneral = 'Acción no autorizada.';
+        } else {
+            corozao_exigir_permiso($pdo, $permisoAccion);
+        }
+
         try {
-            if ($accionPost === 'guardar') {
+            if ($permisoAccion === null) {
+                // La acción ya fue rechazada; no se ejecutan operaciones de escritura.
+            } elseif ($accionPost === 'guardar') {
                 $campos = [
                     'tipo_documento' => 20,
                     'numero_documento' => 20,
@@ -562,8 +563,7 @@ if ($modo === 'listar') {
 
     <?php if (!$auditoriaDisponible): ?>
         <div class="alert alert-warning" role="alert">
-            La tabla de auditoría aún no existe. Puedes consultar proveedores, pero las escrituras están bloqueadas.
-            Revisa y aplica manualmente <code>migrations/20261020_create_auditoria_eventos.sql</code> después de respaldar la base.
+            El servicio de auditoría no está disponible; las escrituras permanecen bloqueadas.
         </div>
     <?php endif; ?>
     <?php if ($flash): ?>
@@ -741,7 +741,7 @@ if ($modo === 'listar') {
             <div class="card-body p-3 p-md-4">
                 <h3 class="h5">Historial de cambios</h3>
                 <?php if (!$auditoriaDisponible): ?>
-                    <p class="text-body-secondary mb-0">Disponible cuando se aplique la migración de auditoría.</p>
+                    <p class="text-body-secondary mb-0">El historial requiere el servicio de auditoría.</p>
                 <?php elseif (!$historial): ?>
                     <p class="text-body-secondary mb-0">No hay eventos registrados para este proveedor.</p>
                 <?php else: ?>

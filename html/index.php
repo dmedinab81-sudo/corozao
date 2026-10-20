@@ -14,6 +14,7 @@ session_set_cookie_params([
 ]);
 
 session_start();
+require_once __DIR__ . '/includes/autorizacion.php';
 
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
@@ -36,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (
         !is_string($csrfRecibido) ||
-        !hash_equals($_SESSION['csrf_token'], $csrfRecibido)
+        !corozao_csrf_valido($csrfRecibido)
     ) {
         http_response_code(403);
         $error = 'La solicitud expiró. Recarga la página e inténtalo nuevamente.';
@@ -112,7 +113,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$autenticado = isset($_SESSION['usuario_id'], $_SESSION['rol']);
+$usuarioActual = null;
+if (isset($_SESSION['usuario_id'])) {
+    try {
+        require '/etc/corozao/database.php';
+        $usuarioActual = corozao_usuario_sesion($pdo);
+        if ($usuarioActual === null) {
+            unset($_SESSION['usuario_id'], $_SESSION['rol'], $_SESSION['nombre_completo'], $_SESSION['nombre_usuario']);
+        }
+    } catch (Throwable $e) {
+        error_log('Corozao: no se pudo validar la sesión activa.');
+        http_response_code(503);
+        $error = 'No se pudo validar la sesión. Inténtalo más tarde.';
+    }
+}
+$autenticado = $usuarioActual !== null;
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -159,14 +174,26 @@ $autenticado = isset($_SESSION['usuario_id'], $_SESSION['rol']);
         </div>
       </section>
     </div>
-    <?php if ($_SESSION['rol'] === 'ADMINISTRADOR'): ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'suppliers.view')): ?>
       <div class="col-12 col-md-6 col-xl-4">
         <section class="card h-100 shadow-sm" aria-labelledby="modulo-proveedores">
           <div class="card-body d-flex flex-column p-4">
-            <span class="badge text-bg-warning align-self-start mb-3">Lectura disponible</span>
+            <span class="badge text-bg-success align-self-start mb-3">Disponible</span>
             <h2 id="modulo-proveedores" class="h5">Proveedores</h2>
-            <p class="text-body-secondary flex-grow-1">Busca, consulta y administra proveedores y sus productos. Las escrituras están pendientes de habilitar la migración de auditoría.</p>
+            <p class="text-body-secondary flex-grow-1">Busca, consulta y administra proveedores y sus productos.</p>
             <a class="btn btn-outline-primary" href="/proveedores.php">Abrir proveedores</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'users.warehouses.assign')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-asignaciones">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-primary align-self-start mb-3">Administración</span>
+            <h2 id="modulo-asignaciones" class="h5">Acceso por bodega</h2>
+            <p class="text-body-secondary flex-grow-1">Asigna o revoca el acceso de cajeros y meseros a bodegas.</p>
+            <a class="btn btn-outline-primary" href="/asignaciones_bodega.php">Gestionar asignaciones</a>
           </div>
         </section>
       </div>
