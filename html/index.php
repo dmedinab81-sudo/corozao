@@ -171,6 +171,8 @@ $autenticado = isset($_SESSION['usuario_id'], $_SESSION['rol']);
         }
         .detalle { color: #64748b; font-size: 14px; }
     </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
 <main class="panel">
@@ -215,5 +217,6 @@ $autenticado = isset($_SESSION['usuario_id'], $_SESSION['rol']);
         </form>
     <?php endif; ?>
 </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
