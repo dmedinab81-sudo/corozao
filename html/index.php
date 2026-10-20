@@ -123,62 +123,93 @@ $autenticado = isset($_SESSION['usuario_id'], $_SESSION['rol']);
     <title>Corozao | Sistema de inventario y ventas</title>
 </head>
 <body class="bg-body-tertiary">
+<?php if ($autenticado): ?>
+<nav class="navbar bg-white border-bottom">
+  <div class="container-xxl">
+    <a class="navbar-brand fw-semibold" href="/">Corozao</a>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge text-bg-primary"><?= escapar((string) $_SESSION['rol']) ?></span>
+      <form method="post" class="m-0">
+        <input type="hidden" name="csrf_token" value="<?= escapar($_SESSION['csrf_token']) ?>">
+        <input type="hidden" name="accion" value="salir">
+        <button class="btn btn-sm btn-outline-secondary" type="submit">Cerrar sesión</button>
+      </form>
+    </div>
+  </div>
+</nav>
+<main class="container-xxl py-4 py-lg-5">
+  <header class="mb-4">
+    <p class="text-primary fw-semibold mb-1">Panel de trabajo</p>
+    <h1 class="h2 mb-2">Bienvenido, <?= escapar((string) $_SESSION['nombre_completo']) ?></h1>
+    <p class="text-body-secondary mb-0">Sesión de <?= escapar((string) $_SESSION['nombre_usuario']) ?> · <?= escapar((string) $_SESSION['rol']) ?></p>
+  </header>
+
+  <?php if ($error !== ''): ?>
+    <div class="alert alert-danger" role="alert"><?= escapar($error) ?></div>
+  <?php endif; ?>
+
+  <div class="row g-3 g-lg-4">
+    <div class="col-12 col-md-6 col-xl-4">
+      <section class="card h-100 shadow-sm" aria-labelledby="modulo-productos">
+        <div class="card-body d-flex flex-column p-4">
+          <span class="badge text-bg-success align-self-start mb-3">Disponible</span>
+          <h2 id="modulo-productos" class="h5">Catálogo de productos</h2>
+          <p class="text-body-secondary flex-grow-1">Consulta y busca los productos registrados.</p>
+          <a class="btn btn-primary" href="/productos.php">Abrir catálogo</a>
+        </div>
+      </section>
+    </div>
+    <?php if ($_SESSION['rol'] === 'ADMINISTRADOR'): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-proveedores">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-warning align-self-start mb-3">Lectura disponible</span>
+            <h2 id="modulo-proveedores" class="h5">Proveedores</h2>
+            <p class="text-body-secondary flex-grow-1">Busca, consulta y administra proveedores y sus productos. Las escrituras están pendientes de habilitar la migración de auditoría.</p>
+            <a class="btn btn-outline-primary" href="/proveedores.php">Abrir proveedores</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
+  </div>
+
+  <div class="alert alert-info mt-4 mb-0" role="status">
+    Los módulos de inventario, ventas, caja y pedidos están pendientes de implementación.
+  </div>
+</main>
+<?php else: ?>
 <main class="container min-vh-100 d-flex align-items-center justify-content-center py-4">
   <section class="card shadow-sm w-100" style="max-width: 32rem" aria-labelledby="titulo-principal">
     <div class="card-body p-4 p-md-5">
-    <div class="mb-4">
+      <div class="mb-4">
         <span class="badge text-bg-primary mb-3">Corozao</span>
         <h1 id="titulo-principal" class="h3 mb-2">Sistema de inventario y ventas</h1>
         <p class="text-body-secondary mb-0">Acceso seguro al sistema</p>
-    </div>
-
-    <?php if ($error !== ''): ?>
+      </div>
+      <?php if ($error !== ''): ?>
         <div class="alert alert-danger" role="alert"><?= escapar($error) ?></div>
-    <?php endif; ?>
+      <?php endif; ?>
+      <form method="post" autocomplete="on">
+        <input type="hidden" name="csrf_token" value="<?= escapar($_SESSION['csrf_token']) ?>">
 
-    <?php if ($autenticado): ?>
-        <h2 class="h5">Bienvenido, <?= escapar((string) $_SESSION['nombre_completo']) ?></h2>
-        <dl class="row small text-body-secondary mb-4">
-            <dt class="col-4">Usuario</dt>
-            <dd class="col-8"><?= escapar((string) $_SESSION['nombre_usuario']) ?></dd>
-            <dt class="col-4">Rol</dt>
-            <dd class="col-8"><?= escapar((string) $_SESSION['rol']) ?></dd>
-        </dl>
-        <div class="alert alert-info" role="status">El catálogo está disponible. Los módulos de inventario y ventas aún están pendientes.</div>
-        <a class="btn btn-primary w-100 mb-3" href="/productos.php">Abrir catálogo de productos</a>
-        <?php if ($_SESSION['rol'] === 'ADMINISTRADOR'): ?>
-            <a class="btn btn-outline-primary w-100 mb-3" href="/proveedores.php">Administrar proveedores</a>
-        <?php endif; ?>
+        <div class="mb-3">
+          <label class="form-label" for="usuario">Usuario</label>
+          <input class="form-control form-control-lg" id="usuario" name="usuario" type="text"
+                 maxlength="60" autocomplete="username" required autofocus>
+        </div>
 
-        <form method="post">
-            <input type="hidden" name="csrf_token"
-                   value="<?= escapar($_SESSION['csrf_token']) ?>">
-            <input type="hidden" name="accion" value="salir">
-            <button class="btn btn-outline-secondary w-100" type="submit">Cerrar sesión</button>
-        </form>
-    <?php else: ?>
-        <form method="post" autocomplete="on">
-            <input type="hidden" name="csrf_token"
-                   value="<?= escapar($_SESSION['csrf_token']) ?>">
+        <div class="mb-4">
+          <label class="form-label" for="clave">Contraseña</label>
+          <input class="form-control form-control-lg" id="clave" name="clave" type="password"
+                 maxlength="1024" autocomplete="current-password" required>
+        </div>
 
-            <div class="mb-3">
-                <label class="form-label" for="usuario">Usuario</label>
-                <input class="form-control form-control-lg" id="usuario" name="usuario" type="text"
-                       maxlength="60" autocomplete="username" required autofocus>
-            </div>
-
-            <div class="mb-4">
-                <label class="form-label" for="clave">Contraseña</label>
-                <input class="form-control form-control-lg" id="clave" name="clave" type="password"
-                       maxlength="1024" autocomplete="current-password" required>
-            </div>
-
-            <button class="btn btn-primary btn-lg w-100" type="submit">Ingresar</button>
-        </form>
-    <?php endif; ?>
+        <button class="btn btn-primary btn-lg w-100" type="submit">Ingresar</button>
+      </form>
     </div>
   </section>
 </main>
+<?php endif; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
