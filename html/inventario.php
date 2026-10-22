@@ -46,7 +46,9 @@ $fechaValida = static function (mixed $fecha): string {
 $desde = $fechaValida($desdeRaw);
 $hasta = $fechaValida($hastaRaw);
 $bodegaActualId = null;
-$error = null;
+$error = (($desdeRaw !== '' && $desde === '') || ($hastaRaw !== '' && $hasta === ''))
+    ? 'Ingresa fechas válidas para el filtro.'
+    : null;
 $filas = [];
 
 if ($bodegas) {
@@ -61,7 +63,7 @@ if ($desde !== '' && $hasta !== '' && $desde > $hasta) {
     $error = 'El rango de fechas no es válido.';
 }
 if (strlen($buscar) > 100) {
-    $buscar = substr($buscar, 0, 100);
+    $error = 'La búsqueda admite hasta 100 caracteres.';
 }
 
 try {
