@@ -11,7 +11,34 @@ function corozao_transferencias_instaladas(PDO $pdo): bool
                                \'fecha_despacho\', \'recibido_por_usuario_id\', \'fecha_recepcion\')'
     );
     $stmt->execute(['tabla' => 'movimientos_inventario']);
-    return (int) $stmt->fetchColumn() === 5;
+    if ((int) $stmt->fetchColumn() !== 5) {
+        return false;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tabla AND COLUMN_NAME = \'estado\'
+           AND COLUMN_TYPE LIKE \'%EN_TRANSITO%\''
+    );
+    $stmt->execute(['tabla' => 'movimientos_inventario']);
+    if ((int) $stmt->fetchColumn() !== 1) {
+        return false;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tabla
+           AND INDEX_NAME = \'uq_mov_clave_idempotencia\' AND NON_UNIQUE = 0'
+    );
+    $stmt->execute(['tabla' => 'movimientos_inventario']);
+    if ((int) $stmt->fetchColumn() !== 1) {
+        return false;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(DISTINCT CONSTRAINT_NAME) FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tabla
+           AND CONSTRAINT_NAME IN (\'fk_mov_despachador\', \'fk_mov_receptor\')'
+    );
+    $stmt->execute(['tabla' => 'movimientos_inventario']);
+    return (int) $stmt->fetchColumn() === 2;
 }
 
 /** Normaliza una cantidad positiva de hasta tres decimales sin usar flotantes. */

@@ -248,10 +248,22 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'purchases.view')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-compras">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-primary align-self-start mb-3">Administración</span>
+            <h2 id="modulo-compras" class="h5">Compras e ingresos</h2>
+            <p class="text-body-secondary flex-grow-1">Registra borradores y confirma el ingreso de mercadería a una bodega.</p>
+            <a class="btn btn-outline-primary" href="/compras.php">Gestionar compras</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
   <div class="alert alert-info mt-4 mb-0" role="status">
-    Compras, ajustes de inventario, ventas, caja y pedidos están pendientes de implementación.
+    Ajustes de inventario, ventas, caja y pedidos están pendientes de implementación.
   </div>
 </main>
 <?php else: ?>
