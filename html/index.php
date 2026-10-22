@@ -260,10 +260,22 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'inventory.adjustment.view')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-ajustes">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-warning align-self-start mb-3">Inventario</span>
+            <h2 id="modulo-ajustes" class="h5">Ajustes de inventario</h2>
+            <p class="text-body-secondary flex-grow-1">Registra ajustes positivos o negativos con motivo obligatorio y auditoría.</p>
+            <a class="btn btn-outline-primary" href="/ajustes.php">Gestionar ajustes</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
   <div class="alert alert-info mt-4 mb-0" role="status">
-    Ajustes de inventario, ventas, caja y pedidos están pendientes de implementación.
+    Ventas, caja y pedidos están pendientes de implementación.
   </div>
 </main>
 <?php else: ?>

@@ -28,6 +28,7 @@ function corozao_permisos(): array
         'inventory.transfer.receive' => ['ADMINISTRADOR'],
         'inventory.adjustment.create' => ['ADMINISTRADOR'],
         'inventory.adjustment.confirm' => ['ADMINISTRADOR'],
+        'inventory.adjustment.view' => ['ADMINISTRADOR'],
         'inventory.availability.view' => ['ADMINISTRADOR', 'CAJERO'],
         'commercial.prices.view' => ['ADMINISTRADOR', 'CAJERO', 'MESERO'],
         'commercial.prices.manage' => ['ADMINISTRADOR'],
