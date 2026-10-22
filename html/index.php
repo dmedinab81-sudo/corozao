@@ -218,10 +218,28 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'inventory.availability.view')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-inventario">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-<?= $_SESSION['rol'] === 'ADMINISTRADOR' ? 'primary' : 'success' ?> align-self-start mb-3">
+              <?= $_SESSION['rol'] === 'ADMINISTRADOR' ? 'Administración' : 'Consulta asignada' ?>
+            </span>
+            <h2 id="modulo-inventario" class="h5">Inventario y Kardex</h2>
+            <p class="text-body-secondary flex-grow-1">
+              <?= $_SESSION['rol'] === 'ADMINISTRADOR'
+                  ? 'Consulta existencias y movimientos confirmados por bodega.'
+                  : 'Consulta disponibilidad de productos en tus bodegas asignadas.' ?>
+            </p>
+            <a class="btn btn-outline-primary" href="/inventario.php">Consultar inventario</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
   <div class="alert alert-info mt-4 mb-0" role="status">
-    Los módulos de inventario, ventas, caja y pedidos están pendientes de implementación.
+    Compras, movimientos de inventario, ventas, caja y pedidos están pendientes de implementación.
   </div>
 </main>
 <?php else: ?>
