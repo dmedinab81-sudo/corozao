@@ -26,6 +26,18 @@ function inventario_h(mixed $value): string
     return htmlspecialchars((string) ($value ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function inventario_decimal(mixed $value): string
+{
+    $texto = (string) $value;
+    if (!preg_match('/^-?\d+(?:\.\d{1,3})?$/', $texto)) {
+        return '0.000';
+    }
+    $negativo = str_starts_with($texto, '-');
+    $texto = ltrim($texto, '-');
+    [$entero, $fraccion] = array_pad(explode('.', $texto, 2), 2, '');
+    return ($negativo ? '-' : '') . number_format((int) $entero, 0, '.', ',') . '.' . str_pad($fraccion, 3, '0');
+}
+
 $usuario = corozao_exigir_permiso($pdo, 'inventory.availability.view');
 $esAdministrador = $usuario['rol'] === 'ADMINISTRADOR';
 $bodegas = corozao_bodegas_asignadas($pdo, $usuario);
@@ -82,14 +94,42 @@ try {
             $stmt->execute($params);
             $filas = $stmt->fetchAll(PDO::FETCH_ASSOC);
         } elseif ($error === null) {
+            $stmt = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tabla
+                   AND COLUMN_NAME IN (\'fecha_despacho\', \'despachado_por_usuario_id\',
+                                       \'fecha_recepcion\', \'recibido_por_usuario_id\')'
+            );
+            $stmt->execute(['tabla' => 'movimientos_inventario']);
+            $dosEtapas = (int) $stmt->fetchColumn() === 4;
+            $fechaEfectiva = $dosEtapas
+                ? 'CASE WHEN m.tipo_movimiento = \'TRANSFERENCIA\' AND m.bodega_origen_id = :fecha_origen
+                         THEN COALESCE(m.fecha_despacho, m.fecha_movimiento)
+                         WHEN m.tipo_movimiento = \'TRANSFERENCIA\' AND m.bodega_destino_id = :fecha_destino
+                         THEN COALESCE(m.fecha_recepcion, m.fecha_confirmacion, m.fecha_movimiento)
+                         ELSE m.fecha_movimiento END'
+                : 'm.fecha_movimiento';
+            $usuarioMovimiento = $dosEtapas
+                ? 'CASE WHEN m.tipo_movimiento = \'TRANSFERENCIA\' AND m.bodega_origen_id = :usuario_origen
+                         THEN ud.nombre_completo ELSE uf.nombre_completo END'
+                : 'uf.nombre_completo';
+            $fechaFiltro = static fn (string $sufijo): string => $dosEtapas
+                ? 'CASE WHEN m.tipo_movimiento = \'TRANSFERENCIA\' AND m.bodega_origen_id = :filtro_fecha_origen_' . $sufijo . '
+                         THEN COALESCE(m.fecha_despacho, m.fecha_movimiento)
+                         WHEN m.tipo_movimiento = \'TRANSFERENCIA\' AND m.bodega_destino_id = :filtro_fecha_destino_' . $sufijo . '
+                         THEN COALESCE(m.fecha_recepcion, m.fecha_confirmacion, m.fecha_movimiento)
+                         ELSE m.fecha_movimiento END'
+                : 'm.fecha_movimiento';
             $sql = 'SELECT m.movimiento_id, m.tipo_movimiento, m.fecha_movimiento,
                            m.observaciones, p.producto_id, p.nombre AS producto,
                            d.cantidad_base, d.costo_unitario,
                            CASE WHEN m.bodega_destino_id = :bodega_signo
                                 THEN d.cantidad_base ELSE -d.cantidad_base END AS variacion,
+                           ' . $fechaEfectiva . ' AS fecha_efectiva,
+                           m.estado AS estado_movimiento,
                            bo.nombre AS bodega_origen, bd.nombre AS bodega_destino,
                            uc.nombre_completo AS usuario_creador,
-                           uf.nombre_completo AS usuario_confirmador
+                           ' . $usuarioMovimiento . ' AS usuario_confirmador
                     FROM movimientos_inventario m
                     INNER JOIN detalle_movimiento_inventario d ON d.movimiento_id = m.movimiento_id
                     INNER JOIN productos p ON p.producto_id = d.producto_id
@@ -97,8 +137,13 @@ try {
                     LEFT JOIN bodegas bd ON bd.bodega_id = m.bodega_destino_id
                     LEFT JOIN usuarios uc ON uc.usuario_id = m.usuario_id
                     LEFT JOIN usuarios uf ON uf.usuario_id = m.confirmado_por_usuario_id
-                    WHERE m.estado = \'CONFIRMADO\'
-                      AND (m.bodega_origen_id = :bodega_origen OR m.bodega_destino_id = :bodega_destino)
+                    ' . ($dosEtapas ? 'LEFT JOIN usuarios ud ON ud.usuario_id = m.despachado_por_usuario_id ' : '') . '
+                    WHERE ((m.estado = \'CONFIRMADO\'
+                      AND (m.bodega_origen_id = :bodega_origen OR m.bodega_destino_id = :bodega_destino))'
+                    . ($dosEtapas
+                        ? ' OR (m.tipo_movimiento = \'TRANSFERENCIA\' AND m.estado = \'EN_TRANSITO\'
+                             AND m.bodega_origen_id = :bodega_transito)'
+                        : '') . ')
                       AND p.nombre LIKE :buscar';
             $params = [
                 'bodega_signo' => $bodegaActualId,
@@ -106,15 +151,29 @@ try {
                 'bodega_destino' => $bodegaActualId,
                 'buscar' => '%' . $buscar . '%',
             ];
+            if ($dosEtapas) {
+                $params['fecha_origen'] = $bodegaActualId;
+                $params['fecha_destino'] = $bodegaActualId;
+                $params['usuario_origen'] = $bodegaActualId;
+                $params['bodega_transito'] = $bodegaActualId;
+            }
             if ($desde !== '') {
-                $sql .= ' AND m.fecha_movimiento >= :desde';
+                $sql .= ' AND ' . $fechaFiltro('desde') . ' >= :desde';
                 $params['desde'] = $desde . ' 00:00:00';
+                if ($dosEtapas) {
+                    $params['filtro_fecha_origen_desde'] = $bodegaActualId;
+                    $params['filtro_fecha_destino_desde'] = $bodegaActualId;
+                }
             }
             if ($hasta !== '') {
-                $sql .= ' AND m.fecha_movimiento < :hasta';
+                $sql .= ' AND ' . $fechaFiltro('hasta') . ' < :hasta';
                 $params['hasta'] = (new DateTimeImmutable($hasta))->modify('+1 day')->format('Y-m-d') . ' 00:00:00';
+                if ($dosEtapas) {
+                    $params['filtro_fecha_origen_hasta'] = $bodegaActualId;
+                    $params['filtro_fecha_destino_hasta'] = $bodegaActualId;
+                }
             }
-            $sql .= ' ORDER BY m.fecha_movimiento DESC, m.movimiento_id DESC, d.detalle_movimiento_id LIMIT 500';
+            $sql .= ' ORDER BY fecha_efectiva DESC, m.movimiento_id DESC, d.detalle_movimiento_id LIMIT 500';
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             $filas = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -174,11 +233,11 @@ try {
             </tr></thead><tbody>
             <?php foreach ($filas as $fila): ?><tr>
                 <?php if ($modo === 'kardex'): ?>
-                    <td><?= inventario_h($fila['fecha_movimiento']) ?></td><td><?= inventario_h($fila['tipo_movimiento']) ?> #<?= (int) $fila['movimiento_id'] ?></td><td><?= inventario_h($fila['producto']) ?></td>
-                    <td class="text-end <?= (float) $fila['variacion'] < 0 ? 'text-danger' : 'text-success' ?>"><?= number_format((float) $fila['variacion'], 3, '.', ',') ?></td>
+                    <td><?= inventario_h($fila['fecha_efectiva']) ?></td><td><?= inventario_h($fila['tipo_movimiento']) ?><?= $fila['estado_movimiento'] === 'EN_TRANSITO' ? ' (EN TRÁNSITO)' : '' ?> #<?= (int) $fila['movimiento_id'] ?></td><td><?= inventario_h($fila['producto']) ?></td>
+                    <td class="text-end <?= str_starts_with((string) $fila['variacion'], '-') ? 'text-danger' : 'text-success' ?>"><?= inventario_decimal($fila['variacion']) ?></td>
                     <td><?= inventario_h($fila['bodega_origen'] ?? '—') ?></td><td><?= inventario_h($fila['bodega_destino'] ?? '—') ?></td>
                     <td><?= inventario_h($fila['usuario_creador'] ?? '—') ?></td><td><?= inventario_h($fila['usuario_confirmador'] ?? '—') ?></td><td><?= inventario_h($fila['observaciones'] ?? '—') ?></td>
-                <?php else: ?><td><?= inventario_h($fila['producto']) ?></td><td class="text-end fw-semibold"><?= number_format((float) $fila['cantidad_base'], 3, '.', ',') ?></td><?php endif; ?>
+                <?php else: ?><td><?= inventario_h($fila['producto']) ?></td><td class="text-end fw-semibold"><?= inventario_decimal($fila['cantidad_base']) ?></td><?php endif; ?>
             </tr><?php endforeach; ?>
             <?php if (!$filas): ?><tr><td colspan="9" class="text-center text-body-secondary py-4">No hay resultados para estos filtros.</td></tr><?php endif; ?>
             </tbody>
