@@ -174,6 +174,26 @@ $autenticado = $usuarioActual !== null;
         </div>
       </section>
     </div>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'commercial.prices.view')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-comercial-bodega">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-<?= $_SESSION['rol'] === 'ADMINISTRADOR' ? 'primary' : 'success' ?> align-self-start mb-3">
+              <?= $_SESSION['rol'] === 'ADMINISTRADOR' ? 'Administración' : 'Consulta por bodega' ?>
+            </span>
+            <h2 id="modulo-comercial-bodega" class="h5">Catálogo comercial</h2>
+            <p class="text-body-secondary flex-grow-1">
+              <?= $_SESSION['rol'] === 'ADMINISTRADOR'
+                  ? 'Configura habilitación y precios por presentación para cada bodega.'
+                  : 'Consulta precios y presentaciones habilitadas en tus bodegas asignadas.' ?>
+            </p>
+            <a class="btn btn-outline-primary" href="/comercial_bodegas.php">
+              <?= $_SESSION['rol'] === 'ADMINISTRADOR' ? 'Gestionar bodegas' : 'Consultar catálogo' ?>
+            </a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
     <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'suppliers.view')): ?>
       <div class="col-12 col-md-6 col-xl-4">
         <section class="card h-100 shadow-sm" aria-labelledby="modulo-proveedores">

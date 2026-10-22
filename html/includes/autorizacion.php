@@ -31,6 +31,7 @@ function corozao_permisos(): array
         'inventory.availability.view' => ['ADMINISTRADOR', 'CAJERO'],
         'commercial.prices.view' => ['ADMINISTRADOR', 'CAJERO', 'MESERO'],
         'commercial.prices.manage' => ['ADMINISTRADOR'],
+        'commercial.presentations.manage' => ['ADMINISTRADOR'],
         'orders.catalog.view' => ['ADMINISTRADOR', 'MESERO'],
         'orders.open.create' => ['ADMINISTRADOR', 'MESERO'],
         'orders.open.modify_own' => ['ADMINISTRADOR', 'MESERO'],
