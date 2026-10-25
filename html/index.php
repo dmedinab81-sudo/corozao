@@ -272,10 +272,25 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'orders.own.view')
+        || corozao_rol_puede((string) $_SESSION['rol'], 'orders.pending_billing.view')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-pedidos">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-info align-self-start mb-3">Atención</span>
+            <h2 id="modulo-pedidos" class="h5"><?= $_SESSION['rol'] === 'CAJERO' ? 'Pedidos por facturar' : 'Pedidos' ?></h2>
+            <p class="text-body-secondary flex-grow-1"><?= $_SESSION['rol'] === 'CAJERO'
+                ? 'Consulta pedidos que solicitaron facturación.'
+                : 'Registra pedidos, agrega presentaciones y envíalos a preparación o facturación.' ?></p>
+            <a class="btn btn-outline-primary" href="/pedidos.php">Gestionar pedidos</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
   <div class="alert alert-info mt-4 mb-0" role="status">
-    Ventas, caja y pedidos están pendientes de implementación.
+    La conversión de pedidos en ventas, pagos y caja está pendiente de implementación.
   </div>
 </main>
 <?php else: ?>
