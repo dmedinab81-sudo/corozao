@@ -27,6 +27,25 @@ function corozao_caja_conciliacion_instalada(PDO $pdo): bool
     return (int) $stmt->fetchColumn() === 1;
 }
 
+function corozao_caja_fecha_operativa_instalada(PDO $pdo): bool
+{
+    $stmt = $pdo->query('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
+        AND TABLE_NAME=\'cajas\' AND COLUMN_NAME=\'fecha_operativa\' AND DATA_TYPE=\'date\'');
+    return (int) $stmt->fetchColumn() === 1;
+}
+
+function corozao_fecha_operativa_local(): string
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('America/Guayaquil')))->format('Y-m-d');
+}
+
+function corozao_fecha_caja_es_hoy(?string $fechaCaja, string $hoy): bool
+{
+    return $fechaCaja !== null
+        && preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaCaja) === 1
+        && hash_equals($hoy, $fechaCaja);
+}
+
 function corozao_dinero_centavos(string $valor, bool $permitirCero = true): int
 {
     $valor = trim($valor);
@@ -62,6 +81,7 @@ function corozao_caja_abrir(PDO $pdo, int $usuarioId, int $bodegaId, string $mon
         throw new DomainException('La sesión o bodega no son válidas.');
     }
     $centavos = corozao_dinero_centavos($monto);
+    $fechaOperativaInstalada = corozao_caja_fecha_operativa_instalada($pdo);
     try {
         $pdo->beginTransaction();
         $stmt = $pdo->prepare('SELECT bodega_id FROM bodegas WHERE bodega_id = :id AND activo = 1 FOR UPDATE');
@@ -77,12 +97,21 @@ function corozao_caja_abrir(PDO $pdo, int $usuarioId, int $bodegaId, string $mon
         if ($stmt->fetchColumn()) {
             throw new DomainException('Ya tienes una caja abierta en esta bodega.');
         }
-        $stmt = $pdo->prepare(
-            'INSERT INTO cajas (bodega_id, usuario_id, estado, monto_apertura)
-             VALUES (:bodega, :usuario, \'ABIERTA\', :monto)'
-        );
-        $stmt->execute(['bodega' => $bodegaId, 'usuario' => $usuarioId,
-            'monto' => corozao_centavos_decimal($centavos)]);
+        if ($fechaOperativaInstalada) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO cajas (bodega_id, usuario_id, estado, fecha_operativa, monto_apertura)
+                 VALUES (:bodega, :usuario, \'ABIERTA\', :fecha, :monto)'
+            );
+            $stmt->execute(['bodega' => $bodegaId, 'usuario' => $usuarioId,
+                'fecha' => corozao_fecha_operativa_local(), 'monto' => corozao_centavos_decimal($centavos)]);
+        } else {
+            $stmt = $pdo->prepare(
+                'INSERT INTO cajas (bodega_id, usuario_id, estado, monto_apertura)
+                 VALUES (:bodega, :usuario, \'ABIERTA\', :monto)'
+            );
+            $stmt->execute(['bodega' => $bodegaId, 'usuario' => $usuarioId,
+                'monto' => corozao_centavos_decimal($centavos)]);
+        }
         $cajaId = (int) $pdo->lastInsertId();
         corozao_registrar_auditoria($pdo, $usuarioId, 'CREAR', 'cajas', $cajaId, null,
             ['estado' => 'ABIERTA', 'bodega_id' => $bodegaId, 'monto_apertura' => corozao_centavos_decimal($centavos)]);
@@ -186,13 +215,19 @@ function corozao_venta_cobrar(PDO $pdo, int $pedidoId, int $usuarioId, array $en
         if ($pedido['estado'] !== 'PENDIENTE_FACTURACION') {
             throw new DomainException('Solo se pueden cobrar pedidos pendientes de facturación.');
         }
+        $fechaCajaSelect = corozao_caja_fecha_operativa_instalada($pdo)
+            ? 'fecha_operativa' : 'NULL AS fecha_operativa';
         $stmt = $pdo->prepare(
-            'SELECT caja_id, bodega_id FROM cajas WHERE usuario_id = :usuario AND estado = \'ABIERTA\'
-             AND bodega_id = :bodega FOR UPDATE'
+            'SELECT caja_id, bodega_id, ' . $fechaCajaSelect . ' FROM cajas
+             WHERE usuario_id = :usuario AND estado = \'ABIERTA\' AND bodega_id = :bodega FOR UPDATE'
         );
         $stmt->execute(['usuario' => $usuarioId, 'bodega' => $pedido['bodega_id']]);
         $caja = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$caja) throw new DomainException('Abre una caja para la bodega del pedido antes de cobrar.');
+        if (corozao_caja_fecha_operativa_instalada($pdo)
+            && !corozao_fecha_caja_es_hoy($caja['fecha_operativa'] === null ? null : (string)$caja['fecha_operativa'], corozao_fecha_operativa_local())) {
+            throw new DomainException('La caja pertenece a una fecha operativa anterior. Ciérrala y abre una nueva para continuar cobrando.');
+        }
         $totales = corozao_venta_calcular_totales($pdo, $pedidoId);
         $total = $totales['bruto'] - $descuento;
         if ($descuento > $totales['bruto'] || $total < 0) throw new DomainException('El descuento fijo no puede superar el total del pedido.');
