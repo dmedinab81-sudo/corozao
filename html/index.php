@@ -311,6 +311,18 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'inventory.initial_load.create')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-carga-inicial">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-warning align-self-start mb-3">Administración</span>
+            <h2 id="modulo-carga-inicial" class="h5">Inventario inicial</h2>
+            <p class="text-body-secondary flex-grow-1">Autoriza cargas desde conteos cerrados cuando no exista historial en la bodega.</p>
+            <a class="btn btn-outline-primary" href="/cargas_iniciales.php">Revisar conteos elegibles</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
 </main>

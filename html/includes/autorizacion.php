@@ -50,6 +50,7 @@ function corozao_permisos(): array
         'cash.differences.record' => ['ADMINISTRADOR', 'CAJERO'],
         'inventory.physical_count.create' => ['ADMINISTRADOR'],
         'inventory.physical_count.close' => ['ADMINISTRADOR'],
+        'inventory.initial_load.create' => ['ADMINISTRADOR'],
         'reports.view' => ['ADMINISTRADOR'],
         'users.manage' => ['ADMINISTRADOR'],
         'users.warehouses.assign' => ['ADMINISTRADOR'],
