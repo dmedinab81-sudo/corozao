@@ -45,6 +45,7 @@ function corozao_permisos(): array
         'sales.create' => ['ADMINISTRADOR', 'CAJERO'],
         'sales.record_payment' => ['ADMINISTRADOR', 'CAJERO'],
         'sales.invoice' => ['ADMINISTRADOR', 'CAJERO'],
+        'cash.open_own' => ['ADMINISTRADOR', 'CAJERO'],
         'cash.close_own' => ['ADMINISTRADOR', 'CAJERO'],
         'cash.differences.record' => ['ADMINISTRADOR', 'CAJERO'],
         'users.manage' => ['ADMINISTRADOR'],

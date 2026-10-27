@@ -287,11 +287,20 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'sales.create')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-ventas">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-success align-self-start mb-3">Operación de caja</span>
+            <h2 id="modulo-ventas" class="h5">Ventas y caja</h2>
+            <p class="text-body-secondary flex-grow-1">Abre tu caja, cobra pedidos pendientes y registra pagos divididos y cierres.</p>
+            <a class="btn btn-outline-primary" href="/ventas.php">Abrir ventas y caja</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
   </div>
 
-  <div class="alert alert-info mt-4 mb-0" role="status">
-    La conversión de pedidos en ventas, pagos y caja está pendiente de implementación.
-  </div>
 </main>
 <?php else: ?>
 <main class="container min-vh-100 d-flex align-items-center justify-content-center py-4">

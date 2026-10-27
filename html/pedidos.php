@@ -380,7 +380,10 @@ while (count($formLineas) < 10) {
                             <?php endif; ?>
                             <form method="post"><input type="hidden" name="csrf_token" value="<?= pedido_h($csrf) ?>"><input type="hidden" name="accion" value="solicitar_cierre"><input type="hidden" name="pedido_id" value="<?= (int) $pedido['pedido_id'] ?>"><button class="btn btn-sm btn-outline-success" type="submit">Solicitar facturación</button></form>
                         <?php elseif ($pedido['estado'] === 'PENDIENTE_FACTURACION'): ?>
-                            <span class="text-body-secondary">Pendiente de facturar</span>
+                            <span class="text-body-secondary d-block mb-1">Pendiente de facturar</span>
+                            <?php if (corozao_rol_puede((string) $usuario['rol'], 'orders.convert_to_sale')): ?>
+                                <a class="btn btn-sm btn-primary" href="/ventas.php?cobrar=<?= (int) $pedido['pedido_id'] ?>">Continuar al cobro</a>
+                            <?php endif; ?>
                         <?php else: ?><span class="text-body-secondary">En preparación</span><?php endif; ?>
                     </td>
                 </tr><?php endforeach; ?>
