@@ -14,6 +14,7 @@ header('Cache-Control: no-store, private');
 require '/etc/corozao/database.php';
 require_once __DIR__ . '/includes/autorizacion.php';
 require_once __DIR__ . '/includes/ventas.php';
+require_once __DIR__ . '/includes/devoluciones.php';
 require_once __DIR__ . '/includes/reportes.php';
 
 function reporte_h(mixed $v): string { return htmlspecialchars((string) ($v ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
@@ -24,12 +25,14 @@ $error = null;
 $mensaje = $_SESSION['reportes_flash'] ?? null;
 unset($_SESSION['reportes_flash']);
 $listo = false;
+$devolucionesLista = false;
 $bodegas = corozao_bodegas_asignadas($pdo, $usuario);
 $conteoId = filter_var($_GET['conteo'] ?? null, FILTER_VALIDATE_INT) ?: null;
 $bodegaConteoId = filter_var($_GET['bodega_conteo'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
 try { $listo = corozao_ventas_instaladas($pdo) && corozao_reportes_instalados($pdo); }
 catch (Throwable $e) { error_log('Corozao: no se pudo validar esquema de reportes.'); http_response_code(503); $error = 'No se pudo validar el esquema de reportes.'; }
+if ($listo) { try { $devolucionesLista = corozao_devoluciones_instaladas($pdo); } catch (Throwable $e) { error_log('Corozao: no se pudo validar conciliación de reembolsos.'); } }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
     $token = $_POST['csrf_token'] ?? '';
@@ -131,12 +134,16 @@ if ($listo) {
         $cashParams = ['inicio' => $params['inicio'], 'fin' => $params['fin']];
         if ($bodegaFiltro) { $cashWhere[] = 'c.bodega_id=:bodega'; $cashParams['bodega'] = $bodegaFiltro; }
         if ($usuarioFiltro) { $cashWhere[] = 'c.usuario_id=:usuario'; $cashParams['usuario'] = $usuarioFiltro; }
+        $detalleReembolsosSql = $devolucionesLista
+            ? '(SELECT GROUP_CONCAT(CONCAT(\'Reembolso \' , cr.medio, \': esp $\',cr.monto_esperado,\', decl $\',cr.monto_declarado,\', dif $\',cr.diferencia) ORDER BY cr.medio SEPARATOR \' · \') FROM caja_reembolsos_conciliaciones cr WHERE cr.caja_id=c.caja_id)'
+            : 'NULL';
         $stmt = $pdo->prepare('SELECT c.caja_id,c.fecha_cierre,c.monto_esperado AS efectivo_esperado,
             c.monto_declarado AS efectivo_declarado,c.diferencia AS diferencia_efectivo,
             b.nombre AS bodega,u.nombre_completo AS usuario,
             (SELECT COUNT(*) FROM caja_conciliaciones cc0 WHERE cc0.caja_id=c.caja_id) AS medios_conciliados,
-            (SELECT GROUP_CONCAT(CONCAT(cc.medio, \': esp $\',cc.monto_esperado,\', decl $\',cc.monto_declarado,\', dif $\',cc.diferencia)
-                ORDER BY cc.medio SEPARATOR \' · \') FROM caja_conciliaciones cc WHERE cc.caja_id=c.caja_id) AS conciliacion
+            CONCAT_WS(\' · \',(SELECT GROUP_CONCAT(CONCAT(cc.medio, \': esp $\',cc.monto_esperado,\', decl $\',cc.monto_declarado,\', dif $\',cc.diferencia)
+                ORDER BY cc.medio SEPARATOR \' · \') FROM caja_conciliaciones cc WHERE cc.caja_id=c.caja_id),
+                ' . $detalleReembolsosSql . ') AS conciliacion
             FROM cajas c INNER JOIN bodegas b ON b.bodega_id=c.bodega_id INNER JOIN usuarios u ON u.usuario_id=c.usuario_id
             WHERE ' . implode(' AND ', $cashWhere) . ' ORDER BY c.fecha_cierre DESC LIMIT 500');
         $stmt->execute($cashParams); $cierres = $stmt->fetchAll(PDO::FETCH_ASSOC);

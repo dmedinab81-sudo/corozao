@@ -363,10 +363,12 @@ function corozao_venta_cobrar(PDO $pdo, int $pedidoId, int $usuarioId, array $en
     }
 }
 
-function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $declarados, string $observaciones): void
+function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $declarados, string $observaciones, array $reembolsosDeclarados = []): void
 {
     $usaConciliacionCompleta = corozao_caja_conciliacion_instalada($pdo);
+    $usaDevoluciones = function_exists('corozao_devoluciones_instaladas') && corozao_devoluciones_instaladas($pdo);
     $medios = $usaConciliacionCompleta ? ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_CREDITO'] : ['EFECTIVO'];
+    $mediosReembolso = $usaDevoluciones ? ['TRANSFERENCIA', 'TARJETA_CREDITO'] : [];
     if (array_diff(array_keys($declarados), $medios) || array_diff($medios, array_keys($declarados))) {
         throw new DomainException('Declara el total contado para cada medio de pago.');
     }
@@ -374,6 +376,15 @@ function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $decla
     foreach ($medios as $medio) {
         if (!is_string($declarados[$medio])) throw new DomainException('Uno de los importes declarados no es válido.');
         $declaradoCentavos[$medio] = corozao_dinero_centavos($declarados[$medio]);
+    }
+    if (array_diff(array_keys($reembolsosDeclarados), $mediosReembolso)
+        || array_diff($mediosReembolso, array_keys($reembolsosDeclarados))) {
+        throw new DomainException('Declara los reembolsos por transferencia y tarjeta para el cierre.');
+    }
+    $reembolsosDeclaradosCentavos = [];
+    foreach ($mediosReembolso as $medio) {
+        if (!is_string($reembolsosDeclarados[$medio])) throw new DomainException('Uno de los importes reembolsados no es válido.');
+        $reembolsosDeclaradosCentavos[$medio] = corozao_dinero_centavos($reembolsosDeclarados[$medio]);
     }
     $observaciones = trim($observaciones);
     if (mb_strlen($observaciones, 'UTF-8') > 500) throw new DomainException('Las observaciones admiten hasta 500 caracteres.');
@@ -391,9 +402,27 @@ function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $decla
             $esperados[$pago['medio']] = corozao_dinero_centavos((string) $pago['monto']);
         }
         $esperados['EFECTIVO'] += corozao_dinero_centavos((string) $caja['monto_apertura']);
+        $reembolsosEsperados = array_fill_keys($mediosReembolso, 0);
+        if ($usaDevoluciones) {
+            $stmt = $pdo->prepare('SELECT dp.medio,CAST(SUM(dp.monto) AS DECIMAL(14,2)) AS monto
+                FROM devolucion_pagos dp INNER JOIN devoluciones d ON d.devolucion_id=dp.devolucion_id
+                WHERE d.caja_id=:caja AND d.estado=\'APROBADA\' GROUP BY dp.medio');
+            $stmt->execute(['caja' => $cajaId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $pago) {
+                if ($pago['medio'] === 'EFECTIVO') {
+                    $esperados['EFECTIVO'] -= corozao_dinero_centavos((string)$pago['monto']);
+                } elseif (isset($reembolsosEsperados[$pago['medio']])) {
+                    $reembolsosEsperados[$pago['medio']] = corozao_dinero_centavos((string)$pago['monto']);
+                }
+            }
+            if ($esperados['EFECTIVO'] < 0) throw new DomainException('Los reembolsos exceden el efectivo disponible registrado en caja.');
+        }
         $diferencias = [];
         foreach ($medios as $medio) $diferencias[$medio] = $declaradoCentavos[$medio] - $esperados[$medio];
-        $hayDiferencias = in_array(true, array_map(static fn(int $d): bool => $d !== 0, $diferencias), true);
+        $diferenciasReembolso = [];
+        foreach ($mediosReembolso as $medio) $diferenciasReembolso[$medio] = $reembolsosDeclaradosCentavos[$medio] - $reembolsosEsperados[$medio];
+        $hayDiferencias = in_array(true, array_map(static fn(int $d): bool => $d !== 0, $diferencias), true)
+            || in_array(true, array_map(static fn(int $d): bool => $d !== 0, $diferenciasReembolso), true);
         if ($hayDiferencias) {
             corozao_exigir_permiso($pdo, 'cash.differences.record');
         }
@@ -421,6 +450,20 @@ function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $decla
                 'diferencia' => corozao_centavos_decimal($diferencias[$medio])];
             if ($usaConciliacionCompleta) $insertarConciliacion->execute($datos);
             $conciliacionesAuditoria[$medio] = ['esperado' => $datos['esperado'], 'declarado' => $datos['declarado'], 'diferencia' => $datos['diferencia']];
+        }
+        if ($usaDevoluciones) {
+            $insertarReembolso = $pdo->prepare('INSERT INTO caja_reembolsos_conciliaciones
+                (caja_id,medio,monto_esperado,monto_declarado,diferencia)
+                VALUES (:caja,:medio,:esperado,:declarado,:diferencia)');
+            foreach ($mediosReembolso as $medio) {
+                $datos = ['caja' => $cajaId, 'medio' => $medio,
+                    'esperado' => corozao_centavos_decimal($reembolsosEsperados[$medio]),
+                    'declarado' => corozao_centavos_decimal($reembolsosDeclaradosCentavos[$medio]),
+                    'diferencia' => corozao_centavos_decimal($diferenciasReembolso[$medio])];
+                $insertarReembolso->execute($datos);
+                $conciliacionesAuditoria['REEMBOLSO_' . $medio] = ['esperado' => $datos['esperado'],
+                    'declarado' => $datos['declarado'], 'diferencia' => $datos['diferencia']];
+            }
         }
         corozao_registrar_auditoria($pdo, $usuarioId, 'MODIFICAR', 'cajas', $cajaId,
             ['estado' => 'ABIERTA'], ['estado' => 'CERRADA', 'conciliacion_completa' => $usaConciliacionCompleta,

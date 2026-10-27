@@ -299,6 +299,18 @@ $autenticado = $usuarioActual !== null;
         </section>
       </div>
     <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'sales.return.request')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-devoluciones">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-warning align-self-start mb-3">Devoluciones</span>
+            <h2 id="modulo-devoluciones" class="h5">Devoluciones de ventas</h2>
+            <p class="text-body-secondary flex-grow-1">Solicita devoluciones o, como administrador, aprueba el reembolso y decide si los productos vuelven a stock.</p>
+            <a class="btn btn-outline-primary" href="/devoluciones.php">Gestionar devoluciones</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
     <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'reports.view')): ?>
       <div class="col-12 col-md-6 col-xl-4">
         <section class="card h-100 shadow-sm" aria-labelledby="modulo-reportes">

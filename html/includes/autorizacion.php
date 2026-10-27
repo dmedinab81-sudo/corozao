@@ -45,6 +45,8 @@ function corozao_permisos(): array
         'sales.create' => ['ADMINISTRADOR', 'CAJERO'],
         'sales.record_payment' => ['ADMINISTRADOR', 'CAJERO'],
         'sales.invoice' => ['ADMINISTRADOR', 'CAJERO'],
+        'sales.return.request' => ['ADMINISTRADOR', 'CAJERO'],
+        'sales.return.approve' => ['ADMINISTRADOR'],
         'cash.open_own' => ['ADMINISTRADOR', 'CAJERO'],
         'cash.close_own' => ['ADMINISTRADOR', 'CAJERO'],
         'cash.differences.record' => ['ADMINISTRADOR', 'CAJERO'],
@@ -55,7 +57,7 @@ function corozao_permisos(): array
         'users.manage' => ['ADMINISTRADOR'],
         'users.warehouses.assign' => ['ADMINISTRADOR'],
         'audit.view' => ['ADMINISTRADOR'],
-        // Anulación, devolución y correcciones requieren un procedimiento aún no definido.
+        // La anulación y edición de ventas confirmadas siguen denegadas por defecto.
         'sales.void' => [],
         'sales.refund' => [],
         'sales.confirmed.modify' => [],

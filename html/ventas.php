@@ -14,6 +14,7 @@ header('Cache-Control: no-store, private');
 require '/etc/corozao/database.php';
 require_once __DIR__ . '/includes/autorizacion.php';
 require_once __DIR__ . '/includes/ventas.php';
+require_once __DIR__ . '/includes/devoluciones.php';
 
 function venta_h(mixed $valor): string { return htmlspecialchars((string) ($valor ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function venta_uuid(): string
@@ -30,6 +31,7 @@ $error = null;
 $listo = false;
 $conciliacionLista = false;
 $fechaOperativaLista = false;
+$devolucionesLista = false;
 $mensaje = $_SESSION['ventas_flash'] ?? null;
 unset($_SESSION['ventas_flash']);
 $bodegas = corozao_bodegas_asignadas($pdo, $usuario);
@@ -46,6 +48,8 @@ if ($listo) {
     catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de conciliación.'); }
     try { $fechaOperativaLista = corozao_caja_fecha_operativa_instalada($pdo); }
     catch (Throwable $e) { error_log('Corozao: no se pudo validar la fecha operativa de caja.'); }
+    try { $devolucionesLista = corozao_devoluciones_instaladas($pdo); }
+    catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de devoluciones.'); }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
@@ -69,9 +73,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
                 corozao_exigir_permiso($pdo, 'cash.close_own');
                 $cajaId = filter_var($_POST['caja_id'] ?? null, FILTER_VALIDATE_INT);
                 $declarados = $_POST['declarados'] ?? null;
+                $reembolsosDeclarados = $_POST['reembolsos_declarados'] ?? [];
                 $observaciones = $_POST['observaciones_cierre'] ?? '';
-                if (!$cajaId || !is_array($declarados) || !is_string($observaciones)) throw new DomainException('Los datos de cierre no son válidos.');
-                corozao_caja_cerrar($pdo, $cajaId, (int) $usuario['usuario_id'], $declarados, $observaciones);
+                if (!$cajaId || !is_array($declarados) || !is_array($reembolsosDeclarados) || !is_string($observaciones)) throw new DomainException('Los datos de cierre no son válidos.');
+                corozao_caja_cerrar($pdo, $cajaId, (int) $usuario['usuario_id'], $declarados, $observaciones, $reembolsosDeclarados);
                 $_SESSION['ventas_flash'] = $conciliacionLista
                     ? 'Caja cerrada y conciliada por cada medio de pago.'
                     : 'Caja cerrada con conciliación de efectivo. La conciliación de transferencias y tarjetas queda pendiente de instalar.';
@@ -136,12 +141,13 @@ if ($listo && $ventaId) {
 ?>
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"><title>Ventas y caja | Corozao</title></head>
-<body class="bg-body-tertiary"><nav class="navbar bg-white border-bottom"><div class="container-xxl"><a class="navbar-brand fw-semibold" href="/">Corozao</a><div><span class="badge text-bg-primary"><?= venta_h($usuario['rol']) ?></span> <a class="btn btn-sm btn-outline-secondary ms-2" href="/">Inicio</a></div></div></nav>
+<body class="bg-body-tertiary"><nav class="navbar bg-white border-bottom"><div class="container-xxl"><a class="navbar-brand fw-semibold" href="/">Corozao</a><div><span class="badge text-bg-primary"><?= venta_h($usuario['rol']) ?></span> <a class="btn btn-sm btn-outline-primary ms-2" href="/devoluciones.php">Devoluciones</a> <a class="btn btn-sm btn-outline-secondary" href="/">Inicio</a></div></div></nav>
 <main class="container-xxl py-4"><header class="mb-4"><p class="text-primary fw-semibold mb-1">Operación</p><h1 class="h2">Ventas y caja</h1><p class="text-body-secondary">Cobra pedidos pendientes, registra pagos divididos y controla tu caja.</p></header>
 <?php if ($mensaje): ?><div class="alert alert-success" role="status"><?= venta_h($mensaje) ?></div><?php endif; ?>
 <?php if ($error): ?><div class="alert alert-danger" role="alert"><?= venta_h($error) ?></div><?php endif; ?>
 <?php if (!$listo): ?><div class="alert alert-warning">El módulo aún no está habilitado. Aplica manualmente <code>migrations/20261026_ventas_caja.sql</code>; esta página no ejecuta migraciones.</div><?php else: ?>
 <?php if (!$fechaOperativaLista): ?><div class="alert alert-warning" role="status">El cierre diario por fecha local aún no está activo. Aplica manualmente <code>migrations/20261027_fecha_operativa_caja.sql</code>; las cajas actuales no se modifican.</div><?php endif; ?>
+<?php if (!$devolucionesLista): ?><div class="alert alert-warning" role="status">Las devoluciones aún no están activas. Aplica manualmente <code>migrations/20261028_devoluciones.sql</code>; esta página no ejecuta migraciones.</div><?php endif; ?>
 <?php if ($venta): ?><section class="alert alert-success"><h2 class="h5">Venta #<?= (int) $venta['venta_id'] ?> registrada</h2><p class="mb-1">Total cobrado: $<?= venta_h($venta['total']) ?> · Descuento fijo: $<?= venta_h($venta['descuento_valor']) ?></p><p class="mb-0">Destinatario: <?= venta_h($venta['nombre_destinatario']) ?> · Estado de estructura electrónica: <?= venta_h($venta['estado_factura'] ?? 'PENDIENTE') ?>. No se ha generado ni enviado un comprobante al SRI.</p></section><?php endif; ?>
 <?php if ($listo && $fechaOperativaLista): foreach ($cajas as $caja): $fechaCaja = $caja['fecha_operativa'] === null ? null : (string)$caja['fecha_operativa']; if (!corozao_fecha_caja_es_hoy($fechaCaja, corozao_fecha_operativa_local())): ?><div class="alert alert-warning" role="alert">La caja #<?= (int)$caja['caja_id'] ?> de <?= venta_h($caja['bodega']) ?> pertenece a <?= venta_h($fechaCaja ?? 'una fecha histórica sin etiqueta') ?>. No admite nuevos cobros; ciérrala y abre una caja para el día actual.</div><?php endif; endforeach; endif; ?>
 <section class="card shadow-sm mb-4"><div class="card-header bg-white"><h2 class="h5 mb-0">Mis cajas abiertas</h2></div><div class="card-body">
@@ -154,7 +160,24 @@ if ($listo && $ventaId) {
 <div class="col-12"><div class="alert alert-info small mb-0">El registro deja lista la estructura de factura electrónica en estado pendiente. En esta fase no se genera XML, firma ni comunicación con el SRI.</div></div><div class="col-12"><button class="btn btn-primary" type="submit">Confirmar cobro</button><a class="btn btn-outline-secondary" href="/ventas.php">Cancelar</a></div></form></div></section><?php elseif ($cobrarId): ?><div class="alert alert-warning">El pedido no está pendiente o no está asignado a tus bodegas.</div><?php endif; ?>
 <section class="card shadow-sm"><div class="card-header bg-white"><h2 class="h5 mb-0">Pedidos pendientes de cobro</h2></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Pedido</th><th>Bodega</th><th>Referencia</th><th>Líneas</th><th>Total referencial</th><th></th></tr></thead><tbody><?php foreach ($pedidos as $p): ?><tr><td>#<?= (int)$p['pedido_id'] ?><br><small><?= venta_h($p['fecha_solicitud_cierre']) ?></small></td><td><?= venta_h($p['bodega']) ?></td><td><?= venta_h($p['referencia_cliente'] ?? '—') ?></td><td><?= (int)$p['lineas'] ?></td><td>$<?= venta_h($p['total']) ?></td><td><a class="btn btn-sm btn-primary" href="/ventas.php?cobrar=<?= (int)$p['pedido_id'] ?>">Cobrar</a></td></tr><?php endforeach; ?><?php if (!$pedidos): ?><tr><td colspan="6" class="text-center text-body-secondary py-4">No hay pedidos pendientes de cobro.</td></tr><?php endif; ?></tbody></table></div></section>
 <section class="card shadow-sm mt-4"><div class="card-header bg-white"><h2 class="h5 mb-0">Mis ventas recientes</h2></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Venta / fecha</th><th>Destinatario</th><th>Pagos</th><th>Descuento fijo</th><th>Total</th><th>Factura electrónica</th></tr></thead><tbody><?php foreach ($ventasPropias as $v): ?><tr><td>#<?= (int)$v['venta_id'] ?><br><small><?= venta_h($v['fecha_venta']) ?></small></td><td><?= venta_h($v['nombre_destinatario']) ?></td><td><?= venta_h($v['pagos'] ?? '—') ?></td><td>$<?= venta_h($v['descuento_valor']) ?></td><td>$<?= venta_h($v['total']) ?></td><td><?= venta_h($v['estado_factura'] ?? 'PENDIENTE') ?></td></tr><?php endforeach; ?><?php if (!$ventasPropias): ?><tr><td colspan="6" class="text-center text-body-secondary py-4">Todavía no has registrado ventas.</td></tr><?php endif; ?></tbody></table></div><div class="card-footer small text-body-secondary">La consulta está limitada a ventas creadas por tu usuario. Los comprobantes electrónicos quedan pendientes para integrar después.</div></section>
-<?php endif; ?></main><script>
+<?php endif; ?></main><?php if ($devolucionesLista): ?><script>
+document.querySelectorAll('form').forEach(form => {
+  if (form.querySelector('input[name="accion"][value="cerrar_caja"]')) {
+    const cajaId = form.querySelector('input[name="caja_id"]')?.value || '0';
+    const boton = form.querySelector('button[type="submit"]')?.parentElement;
+    ['TRANSFERENCIA', 'TARJETA_CREDITO'].forEach((medio) => {
+      const col = document.createElement('div'); col.className = 'col-12 col-md-6';
+      const label = document.createElement('label'); label.className = 'form-label';
+      label.htmlFor = `reembolso-${cajaId}-${medio}`;
+      label.textContent = medio === 'TRANSFERENCIA' ? 'Transferencias reembolsadas' : 'Tarjetas reembolsadas';
+      const input = document.createElement('input'); input.className = 'form-control'; input.type = 'number';
+      input.min = '0'; input.step = '0.01'; input.required = true; input.value = '0.00';
+      input.id = label.htmlFor; input.name = `reembolsos_declarados[${medio}]`;
+      col.append(label, input); form.insertBefore(col, boton);
+    });
+  }
+});
+</script><?php endif; ?><script>
 const opts = document.querySelectorAll('input[name="tipo_destinatario"]');
 const campos = document.querySelectorAll('.campo-factura');
 function alternarFactura(){const factura=document.querySelector('#factura-si')?.checked; campos.forEach(c=>{c.hidden=!factura;c.querySelectorAll('input,select').forEach(i=>{i.disabled=!factura;i.required=factura&&['identificacion_destinatario','nombre_destinatario'].includes(i.name)});});}
