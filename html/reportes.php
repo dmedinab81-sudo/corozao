@@ -88,7 +88,7 @@ $medioFiltroRaw = $_GET['medio'] ?? '';
 $medioFiltro = is_string($medioFiltroRaw) && in_array($medioFiltroRaw, ['', 'EFECTIVO', 'TRANSFERENCIA', 'TARJETA_CREDITO'], true) ? $medioFiltroRaw : '';
 if ($bodegaFiltro && !in_array($bodegaFiltro, array_map(static fn($b)=>(int)$b['bodega_id'], $bodegas), true)) { http_response_code(403); exit('Bodega no autorizada.'); }
 
-$resumenMedios = $resumenProductos = $resumenBodegas = $cierres = $listaUsuarios = $catalogo = $conteos = $detallesConteo = [];
+$resumenMedios = $resumenProductos = $resumenBodegas = $cierres = $listaUsuarios = $catalogo = $conteos = $detallesConteo = $resumenDevoluciones = [];
 $conteoActivo = null;
 if ($listo) {
     try {
@@ -129,6 +129,31 @@ if ($listo) {
             INNER JOIN usuarios u ON u.usuario_id=v.usuario_id WHERE ' . implode(' AND ', $detailWhere) . '
             GROUP BY p.producto_id,p.nombre,b.bodega_id,b.nombre,u.usuario_id,u.nombre_completo ORDER BY p.nombre,b.nombre,u.nombre_completo LIMIT 1000');
         $stmt->execute($detailParams); $resumenProductos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($devolucionesLista) {
+            $devolucionWhere = ['d.estado=\'APROBADA\'', 'd.fecha_resolucion >= :inicio', 'd.fecha_resolucion < :fin'];
+            $devolucionParams = ['inicio' => $params['inicio'], 'fin' => $params['fin']];
+            if ($bodegaFiltro) { $devolucionWhere[] = 'v.bodega_id=:bodega_devolucion'; $devolucionParams['bodega_devolucion'] = $bodegaFiltro; }
+            if ($usuarioFiltro) { $devolucionWhere[] = 'd.resuelta_por_usuario_id=:resolutor'; $devolucionParams['resolutor'] = $usuarioFiltro; }
+            if ($productoFiltro) { $devolucionWhere[] = 'EXISTS (SELECT 1 FROM devolucion_detalles fdd INNER JOIN venta_detalles fvd ON fvd.venta_detalle_id=fdd.venta_detalle_id WHERE fdd.devolucion_id=d.devolucion_id AND fvd.producto_id=:producto_devolucion)'; $devolucionParams['producto_devolucion'] = $productoFiltro; }
+            if ($medioFiltro !== '') { $devolucionWhere[] = 'EXISTS (SELECT 1 FROM devolucion_pagos fdp WHERE fdp.devolucion_id=d.devolucion_id AND fdp.medio=:medio_devolucion)'; $devolucionParams['medio_devolucion'] = $medioFiltro; }
+            $stmt = $pdo->prepare('SELECT d.devolucion_id,d.venta_id,d.fecha_resolucion,d.motivo,d.motivo_resolucion,
+                    CAST(d.reembolso_total AS DECIMAL(14,2)) AS reembolso_total,b.nombre AS bodega,
+                    solicitante.nombre_completo AS solicitante,resolutor.nombre_completo AS resolutor,
+                    (SELECT GROUP_CONCAT(CONCAT(dp.medio,\' $\',CAST(dp.monto AS CHAR)) ORDER BY dp.medio SEPARATOR \' · \')
+                        FROM devolucion_pagos dp WHERE dp.devolucion_id=d.devolucion_id) AS pagos,
+                    (SELECT GROUP_CONCAT(CONCAT(p.nombre,\' × \',dd.cantidad_base,\' · \',IF(dd.producto_vendible=1,\'vendible\',\'no vendible\'))
+                        ORDER BY p.nombre SEPARATOR \' · \')
+                        FROM devolucion_detalles dd INNER JOIN venta_detalles vd ON vd.venta_detalle_id=dd.venta_detalle_id
+                        INNER JOIN productos p ON p.producto_id=vd.producto_id WHERE dd.devolucion_id=d.devolucion_id) AS productos
+                FROM devoluciones d INNER JOIN ventas v ON v.venta_id=d.venta_id
+                INNER JOIN bodegas b ON b.bodega_id=v.bodega_id
+                INNER JOIN usuarios solicitante ON solicitante.usuario_id=d.solicitada_por_usuario_id
+                INNER JOIN usuarios resolutor ON resolutor.usuario_id=d.resuelta_por_usuario_id
+                WHERE ' . implode(' AND ', $devolucionWhere) . '
+                ORDER BY d.fecha_resolucion DESC,d.devolucion_id DESC LIMIT 500');
+            $stmt->execute($devolucionParams); $resumenDevoluciones = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         $cashWhere = ['c.estado=\'CERRADA\'', 'c.fecha_cierre >= :inicio', 'c.fecha_cierre < :fin'];
         $cashParams = ['inicio' => $params['inicio'], 'fin' => $params['fin']];
@@ -205,4 +230,5 @@ if ($listo && $conteoActivo && $conteoActivo['estado'] === 'ABIERTO') {
 <?php if($conteoActivo['estado']==='ABIERTO'):?><form method="post" class="row g-2 mt-2 align-items-end"><input type="hidden" name="csrf_token" value="<?=reporte_h($csrf)?>"><input type="hidden" name="accion" value="contar_producto"><input type="hidden" name="conteo_id" value="<?=(int)$conteoActivo['conteo_id']?>"><div class="col-12 col-md-7"><label class="form-label" for="producto-conteo">Producto sin contar</label><select class="form-select" id="producto-conteo" name="producto_id" required><option value="">Selecciona</option><?php foreach($productosConteo as $p):?><option value="<?=(int)$p['producto_id']?>"><?=reporte_h($p['nombre'])?> (#<?=(int)$p['producto_id']?>)</option><?php endforeach;?></select></div><div class="col-8 col-md-3"><label class="form-label" for="cantidad-fisica">Cantidad física</label><input class="form-control" type="number" min="0" step="0.001" id="cantidad-fisica" name="cantidad_fisica" required></div><div class="col-4 col-md-2"><button class="btn btn-primary w-100" type="submit">Guardar</button></div></form><?php endif;?>
 <div class="table-responsive mt-3"><table class="table table-sm table-hover align-middle mb-0"><thead class="table-light"><tr><th>Producto</th><th>Teórico al contar</th><th>Físico</th><th>Diferencia</th><th>Contado por / fecha</th></tr></thead><tbody><?php foreach($detallesConteo as $d):?><tr><td><?=reporte_h($d['producto'])?></td><td><?=reporte_h($d['cantidad_teorica'])?></td><td><?=reporte_h($d['cantidad_fisica'])?></td><td class="<?=((float)$d['diferencia']===0.0?'':'text-danger fw-semibold')?>"><?=reporte_h($d['diferencia'])?></td><td><?=reporte_h($d['contado_por'])?><br><small><?=reporte_h($d['fecha_conteo'])?></small></td></tr><?php endforeach;?><?php if(!$detallesConteo):?><tr><td colspan="5" class="text-center text-body-secondary">Todavía no hay lecturas en este conteo.</td></tr><?php endif;?></tbody></table></div></div><?php endif;?></section>
 <section class="card shadow-sm"><div class="card-header bg-white"><h2 class="h5 mb-0">Sesiones de conteo recientes</h2></div><div class="table-responsive"><table class="table table-hover mb-0"><thead class="table-light"><tr><th>Conteo</th><th>Bodega</th><th>Estado</th><th>Productos</th><th>Con diferencia</th><th></th></tr></thead><tbody><?php foreach($conteos as $c):?><tr><td>#<?=(int)$c['conteo_id']?><br><small><?=reporte_h($c['fecha_apertura'])?></small></td><td><?=reporte_h($c['bodega'])?></td><td><?=reporte_h($c['estado'])?></td><td><?=(int)$c['productos_contados']?></td><td><?=(int)$c['diferencias']?></td><td><a class="btn btn-sm btn-outline-primary" href="/reportes.php?conteo=<?=(int)$c['conteo_id']?>">Ver detalle</a></td></tr><?php endforeach;?><?php if(!$conteos):?><tr><td colspan="6" class="text-center text-body-secondary">No hay conteos en el rango.</td></tr><?php endif;?></tbody></table></div></section>
+<?php if($devolucionesLista):?><section class="card shadow-sm mb-4"><div class="card-header bg-white"><h2 class="h5 mb-0">Devoluciones aprobadas</h2><p class="small text-body-secondary mb-0">Filtradas por fecha de aprobación; el usuario corresponde a quien aprobó la devolución.</p></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Devolución / venta</th><th>Fecha</th><th>Bodega</th><th>Solicitó / aprobó</th><th>Productos devueltos</th><th>Reembolso por medio</th><th>Total reembolsado</th><th>Motivo</th></tr></thead><tbody><?php foreach($resumenDevoluciones as $d):?><tr><td>#<?=(int)$d['devolucion_id']?> / #<?=(int)$d['venta_id']?></td><td><?=reporte_h($d['fecha_resolucion'])?></td><td><?=reporte_h($d['bodega'])?></td><td><?=reporte_h($d['solicitante'])?><br><?=reporte_h($d['resolutor'])?></td><td><?=reporte_h($d['productos']??'—')?></td><td><?=reporte_h($d['pagos']??'Sin reembolso monetario')?></td><td>$<?=reporte_h($d['reembolso_total'])?></td><td><?=reporte_h($d['motivo'])?><?php if($d['motivo_resolucion']):?><br><small>Resolución: <?=reporte_h($d['motivo_resolucion'])?></small><?php endif;?></td></tr><?php endforeach;?><?php if(!$resumenDevoluciones):?><tr><td colspan="8" class="text-center text-body-secondary">No hay devoluciones aprobadas para estos filtros.</td></tr><?php endif;?></tbody></table></div></section><?php endif;?>
 <?php endif;?></main></body></html>
