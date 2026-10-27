@@ -20,6 +20,13 @@ function corozao_ventas_instaladas(PDO $pdo): bool
     return (int) $stmt->fetchColumn() === 1;
 }
 
+function corozao_caja_conciliacion_instalada(PDO $pdo): bool
+{
+    $stmt = $pdo->query('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()
+        AND TABLE_TYPE=\'BASE TABLE\' AND TABLE_NAME=\'caja_conciliaciones\'');
+    return (int) $stmt->fetchColumn() === 1;
+}
+
 function corozao_dinero_centavos(string $valor, bool $permitirCero = true): int
 {
     $valor = trim($valor);
@@ -321,9 +328,18 @@ function corozao_venta_cobrar(PDO $pdo, int $pedidoId, int $usuarioId, array $en
     }
 }
 
-function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, string $declarado, string $observaciones): void
+function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, array $declarados, string $observaciones): void
 {
-    $declaradoCentavos = corozao_dinero_centavos($declarado);
+    $usaConciliacionCompleta = corozao_caja_conciliacion_instalada($pdo);
+    $medios = $usaConciliacionCompleta ? ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA_CREDITO'] : ['EFECTIVO'];
+    if (array_diff(array_keys($declarados), $medios) || array_diff($medios, array_keys($declarados))) {
+        throw new DomainException('Declara el total contado para cada medio de pago.');
+    }
+    $declaradoCentavos = [];
+    foreach ($medios as $medio) {
+        if (!is_string($declarados[$medio])) throw new DomainException('Uno de los importes declarados no es válido.');
+        $declaradoCentavos[$medio] = corozao_dinero_centavos($declarados[$medio]);
+    }
     $observaciones = trim($observaciones);
     if (mb_strlen($observaciones, 'UTF-8') > 500) throw new DomainException('Las observaciones admiten hasta 500 caracteres.');
     $pdo->beginTransaction();
@@ -332,22 +348,48 @@ function corozao_caja_cerrar(PDO $pdo, int $cajaId, int $usuarioId, string $decl
         $stmt->execute(['id' => $cajaId, 'usuario' => $usuarioId]);
         $caja = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$caja) throw new DomainException('La caja ya no está abierta o no te pertenece.');
-        $stmt = $pdo->prepare('SELECT CAST(COALESCE(SUM(vp.monto), 0) AS DECIMAL(14,2)) FROM ventas v INNER JOIN venta_pagos vp ON vp.venta_id = v.venta_id WHERE v.caja_id = :caja AND vp.medio = \'EFECTIVO\'');
+        $stmt = $pdo->prepare('SELECT vp.medio, CAST(SUM(vp.monto) AS DECIMAL(14,2)) AS monto FROM ventas v
+            INNER JOIN venta_pagos vp ON vp.venta_id = v.venta_id WHERE v.caja_id = :caja GROUP BY vp.medio');
         $stmt->execute(['caja' => $cajaId]);
-        $efectivoCentavos = corozao_dinero_centavos((string) $stmt->fetchColumn());
-        $esperado = corozao_dinero_centavos((string) $caja['monto_apertura']) + $efectivoCentavos;
-        $diferencia = $declaradoCentavos - $esperado;
-        if ($diferencia !== 0 && $observaciones === '') throw new DomainException('Explica el motivo de la diferencia de caja.');
+        $esperados = array_fill_keys($medios, 0);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $pago) {
+            $esperados[$pago['medio']] = corozao_dinero_centavos((string) $pago['monto']);
+        }
+        $esperados['EFECTIVO'] += corozao_dinero_centavos((string) $caja['monto_apertura']);
+        $diferencias = [];
+        foreach ($medios as $medio) $diferencias[$medio] = $declaradoCentavos[$medio] - $esperados[$medio];
+        $hayDiferencias = in_array(true, array_map(static fn(int $d): bool => $d !== 0, $diferencias), true);
+        if ($hayDiferencias) {
+            corozao_exigir_permiso($pdo, 'cash.differences.record');
+        }
+        if ($hayDiferencias && $observaciones === '') {
+            throw new DomainException('Explica el motivo de las diferencias de caja.');
+        }
         $stmt = $pdo->prepare('UPDATE cajas SET estado = \'CERRADA\', monto_esperado = :esperado, monto_declarado = :declarado,
             diferencia = :diferencia, observaciones_cierre = :observaciones, cerrado_por_usuario_id = :usuario, fecha_cierre = CURRENT_TIMESTAMP(6)
             WHERE caja_id = :id AND estado = \'ABIERTA\'');
-        $stmt->execute(['esperado' => corozao_centavos_decimal($esperado), 'declarado' => corozao_centavos_decimal($declaradoCentavos),
-            'diferencia' => corozao_centavos_decimal($diferencia), 'observaciones' => $observaciones ?: null,
+        $stmt->execute(['esperado' => corozao_centavos_decimal($esperados['EFECTIVO']),
+            'declarado' => corozao_centavos_decimal($declaradoCentavos['EFECTIVO']),
+            'diferencia' => corozao_centavos_decimal($diferencias['EFECTIVO']), 'observaciones' => $observaciones ?: null,
             'usuario' => $usuarioId, 'id' => $cajaId]);
         if ($stmt->rowCount() !== 1) throw new DomainException('No se pudo cerrar la caja.');
+        $conciliacionesAuditoria = [];
+        if ($usaConciliacionCompleta) {
+            $insertarConciliacion = $pdo->prepare('INSERT INTO caja_conciliaciones
+                (caja_id, medio, monto_esperado, monto_declarado, diferencia)
+                VALUES (:caja, :medio, :esperado, :declarado, :diferencia)');
+        }
+        foreach ($medios as $medio) {
+            $datos = ['caja' => $cajaId, 'medio' => $medio,
+                'esperado' => corozao_centavos_decimal($esperados[$medio]),
+                'declarado' => corozao_centavos_decimal($declaradoCentavos[$medio]),
+                'diferencia' => corozao_centavos_decimal($diferencias[$medio])];
+            if ($usaConciliacionCompleta) $insertarConciliacion->execute($datos);
+            $conciliacionesAuditoria[$medio] = ['esperado' => $datos['esperado'], 'declarado' => $datos['declarado'], 'diferencia' => $datos['diferencia']];
+        }
         corozao_registrar_auditoria($pdo, $usuarioId, 'MODIFICAR', 'cajas', $cajaId,
-            ['estado' => 'ABIERTA'], ['estado' => 'CERRADA', 'monto_esperado' => corozao_centavos_decimal($esperado),
-                'monto_declarado' => corozao_centavos_decimal($declaradoCentavos), 'diferencia' => corozao_centavos_decimal($diferencia),
+            ['estado' => 'ABIERTA'], ['estado' => 'CERRADA', 'conciliacion_completa' => $usaConciliacionCompleta,
+                'conciliaciones' => $conciliacionesAuditoria,
                 'observaciones_cierre' => $observaciones ?: null]);
         $pdo->commit();
     } catch (Throwable $e) {

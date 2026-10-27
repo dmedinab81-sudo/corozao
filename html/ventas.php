@@ -28,6 +28,7 @@ $csrf = $_SESSION['csrf_token'] ?? '';
 if (!is_string($csrf) || strlen($csrf) < 32) { $csrf = bin2hex(random_bytes(32)); $_SESSION['csrf_token'] = $csrf; }
 $error = null;
 $listo = false;
+$conciliacionLista = false;
 $mensaje = $_SESSION['ventas_flash'] ?? null;
 unset($_SESSION['ventas_flash']);
 $bodegas = corozao_bodegas_asignadas($pdo, $usuario);
@@ -39,6 +40,10 @@ $ventaId = filter_var($_GET['venta'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
 try { $listo = corozao_ventas_instaladas($pdo); }
 catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de ventas.'); http_response_code(503); $error = 'No se pudo validar el esquema de ventas.'; }
+if ($listo) {
+    try { $conciliacionLista = corozao_caja_conciliacion_instalada($pdo); }
+    catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de conciliación.'); }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
     $token = $_POST['csrf_token'] ?? '';
@@ -60,11 +65,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
             if ($accion === 'cerrar_caja') {
                 corozao_exigir_permiso($pdo, 'cash.close_own');
                 $cajaId = filter_var($_POST['caja_id'] ?? null, FILTER_VALIDATE_INT);
-                $declarado = $_POST['monto_declarado'] ?? '';
+                $declarados = $_POST['declarados'] ?? null;
                 $observaciones = $_POST['observaciones_cierre'] ?? '';
-                if (!$cajaId || !is_string($declarado) || !is_string($observaciones)) throw new DomainException('Los datos de cierre no son válidos.');
-                corozao_caja_cerrar($pdo, $cajaId, (int) $usuario['usuario_id'], $declarado, $observaciones);
-                $_SESSION['ventas_flash'] = 'Caja cerrada y diferencia registrada.';
+                if (!$cajaId || !is_array($declarados) || !is_string($observaciones)) throw new DomainException('Los datos de cierre no son válidos.');
+                corozao_caja_cerrar($pdo, $cajaId, (int) $usuario['usuario_id'], $declarados, $observaciones);
+                $_SESSION['ventas_flash'] = $conciliacionLista
+                    ? 'Caja cerrada y conciliada por cada medio de pago.'
+                    : 'Caja cerrada con conciliación de efectivo. La conciliación de transferencias y tarjetas queda pendiente de instalar.';
                 header('Location: /ventas.php'); exit;
             }
             if ($accion === 'cobrar') {
@@ -72,6 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
                 corozao_exigir_permiso($pdo, 'sales.record_payment');
                 $pedidoId = filter_var($_POST['pedido_id'] ?? null, FILTER_VALIDATE_INT);
                 if (!$pedidoId) throw new DomainException('El pedido seleccionado no es válido.');
+                if (($_POST['tipo_destinatario'] ?? '') === 'FACTURA') {
+                    corozao_exigir_permiso($pdo, 'sales.invoice');
+                }
                 $stmt = $pdo->prepare('SELECT bodega_id FROM pedidos WHERE pedido_id = :id');
                 $stmt->execute(['id' => $pedidoId]);
                 $bodegaId = $stmt->fetchColumn();
@@ -130,7 +140,7 @@ if ($listo && $ventaId) {
 <?php if (!$listo): ?><div class="alert alert-warning">El módulo aún no está habilitado. Aplica manualmente <code>migrations/20261026_ventas_caja.sql</code>; esta página no ejecuta migraciones.</div><?php else: ?>
 <?php if ($venta): ?><section class="alert alert-success"><h2 class="h5">Venta #<?= (int) $venta['venta_id'] ?> registrada</h2><p class="mb-1">Total cobrado: $<?= venta_h($venta['total']) ?> · Descuento fijo: $<?= venta_h($venta['descuento_valor']) ?></p><p class="mb-0">Destinatario: <?= venta_h($venta['nombre_destinatario']) ?> · Estado de estructura electrónica: <?= venta_h($venta['estado_factura'] ?? 'PENDIENTE') ?>. No se ha generado ni enviado un comprobante al SRI.</p></section><?php endif; ?>
 <section class="card shadow-sm mb-4"><div class="card-header bg-white"><h2 class="h5 mb-0">Mis cajas abiertas</h2></div><div class="card-body">
-<?php if (!$cajas): ?><p class="text-body-secondary">No tienes una caja abierta.</p><form method="post" class="row g-3"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="abrir_caja"><div class="col-12 col-md-6"><label class="form-label" for="bodega">Bodega</label><select class="form-select" id="bodega" name="bodega_id" required><option value="">Selecciona</option><?php foreach ($bodegas as $b): ?><option value="<?= (int)$b['bodega_id'] ?>"><?= venta_h($b['nombre']) ?></option><?php endforeach; ?></select></div><div class="col-12 col-md-4"><label class="form-label" for="monto-apertura">Fondo inicial</label><input class="form-control" type="number" min="0" step="0.01" id="monto-apertura" name="monto_apertura" value="0.00" required></div><div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100" type="submit">Abrir caja</button></div></form><?php else: ?><div class="row g-3"><?php foreach ($cajas as $caja): ?><div class="col-12 col-lg-6"><article class="border rounded p-3"><div class="d-flex justify-content-between"><strong><?= venta_h($caja['bodega']) ?></strong><span class="badge text-bg-success">ABIERTA</span></div><p class="small text-body-secondary">Abierta <?= venta_h($caja['fecha_apertura']) ?> · Fondo $<?= venta_h($caja['monto_apertura']) ?></p><form method="post" class="row g-2"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="cerrar_caja"><input type="hidden" name="caja_id" value="<?= (int)$caja['caja_id'] ?>"><div class="col-12 col-md-5"><label class="form-label" for="declarado-<?= (int)$caja['caja_id'] ?>">Efectivo contado</label><input class="form-control" type="number" min="0" step="0.01" id="declarado-<?= (int)$caja['caja_id'] ?>" name="monto_declarado" required></div><div class="col-12 col-md-5"><label class="form-label" for="obs-<?= (int)$caja['caja_id'] ?>">Motivo diferencia</label><input class="form-control" id="obs-<?= (int)$caja['caja_id'] ?>" name="observaciones_cierre" maxlength="500"></div><div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-outline-danger w-100" type="submit">Cerrar</button></div></form></article></div><?php endforeach; ?></div><?php endif; ?></div></section>
+<?php if (!$cajas): ?><p class="text-body-secondary">No tienes una caja abierta.</p><form method="post" class="row g-3"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="abrir_caja"><div class="col-12 col-md-6"><label class="form-label" for="bodega">Bodega</label><select class="form-select" id="bodega" name="bodega_id" required><option value="">Selecciona</option><?php foreach ($bodegas as $b): ?><option value="<?= (int)$b['bodega_id'] ?>"><?= venta_h($b['nombre']) ?></option><?php endforeach; ?></select></div><div class="col-12 col-md-4"><label class="form-label" for="monto-apertura">Fondo inicial</label><input class="form-control" type="number" min="0" step="0.01" id="monto-apertura" name="monto_apertura" value="0.00" required></div><div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100" type="submit">Abrir caja</button></div></form><?php else: ?><div class="row g-3"><?php foreach ($cajas as $caja): ?><div class="col-12 col-lg-6"><article class="border rounded p-3"><div class="d-flex justify-content-between"><strong><?= venta_h($caja['bodega']) ?></strong><span class="badge text-bg-success">ABIERTA</span></div><p class="small text-body-secondary">Abierta <?= venta_h($caja['fecha_apertura']) ?> · Fondo $<?= venta_h($caja['monto_apertura']) ?></p><?php if(!$conciliacionLista):?><div class="alert alert-warning small py-2">La migración de conciliación aún no está instalada; este cierre conciliará efectivo solamente. Aplica <code>20261026_ventas_conteos_conciliacion.sql</code> para incluir transferencias y tarjetas.</div><?php endif;?><form method="post" class="row g-2"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="cerrar_caja"><input type="hidden" name="caja_id" value="<?= (int)$caja['caja_id'] ?>"><?php $mediosCierre = $conciliacionLista ? ['EFECTIVO'=>'Efectivo contado','TRANSFERENCIA'=>'Transferencias recibidas','TARJETA_CREDITO'=>'Tarjetas cobradas'] : ['EFECTIVO'=>'Efectivo contado']; foreach ($mediosCierre as $medio=>$etiqueta): ?><div class="col-12 col-md-4"><label class="form-label" for="declarado-<?= (int)$caja['caja_id'] ?>-<?= $medio ?>"><?= venta_h($etiqueta) ?></label><input class="form-control" type="number" min="0" step="0.01" id="declarado-<?= (int)$caja['caja_id'] ?>-<?= $medio ?>" name="declarados[<?= $medio ?>]" value="0.00" required></div><?php endforeach; ?><div class="col-12 col-md-8"><label class="form-label" for="obs-<?= (int)$caja['caja_id'] ?>">Motivo obligatorio si existe diferencia</label><input class="form-control" id="obs-<?= (int)$caja['caja_id'] ?>" name="observaciones_cierre" maxlength="500"></div><div class="col-12 col-md-4 d-flex align-items-end"><button class="btn btn-outline-danger w-100" type="submit"><?= $conciliacionLista ? 'Cerrar y conciliar' : 'Cerrar caja' ?></button></div></form></article></div><?php endforeach; ?></div><?php endif; ?></div></section>
 <?php if ($pedidoCobrar): ?><section class="card shadow-sm mb-4"><div class="card-header bg-white"><h2 class="h5 mb-0">Cobrar pedido #<?= (int)$pedidoCobrar['pedido_id'] ?> · <?= venta_h($pedidoCobrar['bodega']) ?></h2></div><div class="card-body"><p class="text-body-secondary">El total definitivo se calcula con el detalle guardado. El importe del descuento es un valor monetario fijo; los pagos deben sumar exactamente el total neto.</p><form method="post" class="row g-3" id="form-cobro"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="cobrar"><input type="hidden" name="pedido_id" value="<?= (int)$pedidoCobrar['pedido_id'] ?>">
 <div class="col-12"><fieldset><legend class="h6">¿Desea factura con datos del cliente?</legend><div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="tipo_destinatario" id="factura-si" value="FACTURA" checked><label class="form-check-label" for="factura-si">Sí, registrar datos</label></div><div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="tipo_destinatario" id="factura-no" value="CONSUMIDOR_FINAL"><label class="form-check-label" for="factura-no">No, consumidor final</label></div></fieldset></div>
 <div class="col-12 col-md-4 campo-factura"><label class="form-label" for="tipo-id">Tipo identificación</label><select class="form-select" id="tipo-id" name="tipo_destinatario_detalle"><option value="RUC">RUC</option><option value="CEDULA" selected>Cédula</option><option value="PASAPORTE">Pasaporte</option></select></div>
