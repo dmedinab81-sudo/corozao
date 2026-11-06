@@ -58,6 +58,19 @@ if ($bodegaId !== null) {
     }
 }
 
+$buscarRaw = $_GET['q'] ?? '';
+$buscar = is_string($buscarRaw) ? mb_substr(trim($buscarRaw), 0, 100, 'UTF-8') : '';
+$categoriaRaw = $_GET['categoria'] ?? '';
+$categoriaId = is_string($categoriaRaw) ? filter_var($categoriaRaw, FILTER_VALIDATE_INT) : false;
+$categoriaId = $categoriaId !== false && $categoriaId !== null && $categoriaId > 0 ? (int) $categoriaId : null;
+$estadoRaw = $_GET['estado'] ?? 'TODOS';
+$estado = is_string($estadoRaw) ? $estadoRaw : 'TODOS';
+if (!in_array($estado, ['TODOS', 'HABILITADAS', 'DESHABILITADAS', 'SIN_PRECIO', 'IVA_PENDIENTE'], true)) {
+    $estado = 'TODOS';
+}
+$paginaRaw = filter_var($_GET['pagina'] ?? 1, FILTER_VALIDATE_INT);
+$pagina = max(1, (int) ($paginaRaw ?: 1));
+
 function h(mixed $valor): string
 {
     return htmlspecialchars((string) ($valor ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -73,8 +86,12 @@ function decimalNormalizado(string $valor, int $escala): string
 
 function decimalVisual(string $valor, int $escala): string
 {
-    [$entero, $fraccion] = explode('.', decimalNormalizado($valor, $escala), 2);
-    return number_format((int) $entero, 0, '.', ',') . '.' . $fraccion;
+    return number_format((float) $valor, $escala, '.', ',');
+}
+
+function unidadesVisual(string $valor): string
+{
+    return str_contains($valor, '.') ? rtrim(rtrim($valor, '0'), '.') : $valor;
 }
 
 function snapshotPrecio(?array $precio): ?array
@@ -135,11 +152,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $tarifaNormalizada = null;
 
             if ($accion === 'precio') {
-                if (!preg_match('/^(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,4})?$/', $precioTexto)
+                if (!preg_match('/^(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/', $precioTexto)
                     || trim(str_replace(['0', '.'], '', $precioTexto)) === '') {
-                    $error = 'Ingresa un precio mayor que cero, con hasta cuatro decimales.';
+                    $error = 'Ingresa un precio mayor que cero, con hasta dos decimales.';
                 } else {
-                    $precioNormalizado = decimalNormalizado($precioTexto, 4);
+                    $precioNormalizado = decimalNormalizado($precioTexto, 2);
                 }
                 if ($error === null && !in_array($incluyeTexto, ['0', '1'], true)) {
                     $error = 'Indica explícitamente si el precio incluye IVA.';
@@ -375,7 +392,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
                     $_SESSION['comercial_bodegas_flash'] = $texto;
-                    header('Location: /comercial_bodegas.php?' . http_build_query(['bodega' => $bodegaActivaId]), true, 303);
+                    header('Location: /comercial_bodegas.php?' . http_build_query([
+                        'bodega' => $bodegaActivaId, 'q' => $buscar, 'categoria' => $categoriaId ?? '',
+                        'estado' => $estado, 'pagina' => $pagina,
+                    ]), true, 303);
                     exit;
                 } catch (DomainException $e) {
                     if ($pdo->inTransaction()) {
@@ -400,19 +420,6 @@ if (isset($_SESSION['comercial_bodegas_flash']) && is_string($_SESSION['comercia
     unset($_SESSION['comercial_bodegas_flash']);
 }
 
-$buscarRaw = $_GET['q'] ?? '';
-$buscar = is_string($buscarRaw) ? trim($buscarRaw) : '';
-$buscar = mb_substr($buscar, 0, 100, 'UTF-8');
-$categoriaRaw = $_GET['categoria'] ?? '';
-$categoriaId = is_string($categoriaRaw) ? filter_var($categoriaRaw, FILTER_VALIDATE_INT) : false;
-$categoriaId = $categoriaId !== false && $categoriaId !== null && $categoriaId > 0 ? (int) $categoriaId : null;
-$estadoRaw = $_GET['estado'] ?? 'TODOS';
-$estado = is_string($estadoRaw) ? $estadoRaw : 'TODOS';
-if (!in_array($estado, ['TODOS', 'HABILITADAS', 'DESHABILITADAS', 'SIN_PRECIO', 'IVA_PENDIENTE'], true)) {
-    $estado = 'TODOS';
-}
-$paginaRaw = filter_var($_GET['pagina'] ?? 1, FILTER_VALIDATE_INT);
-$pagina = max(1, (int) ($paginaRaw ?: 1));
 $porPagina = 50;
 $total = 0;
 $filas = [];
@@ -468,7 +475,7 @@ if ($bodegaActivaId !== null) {
     $offset = ($pagina - 1) * $porPagina;
 
     $stmt = $pdo->prepare(
-        'SELECT p.producto_id, p.nombre AS producto_nombre, p.marca,
+        'SELECT p.producto_id, p.nombre AS producto_nombre, p.marca, p.contenido,
                 p.estado_comercial, p.venta_habilitada, p.activo AS producto_activo,
                 c.nombre AS categoria_nombre,
                 pr.presentacion_id, pr.nombre AS presentacion_nombre,
@@ -535,8 +542,10 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Gestión comercial por bodega | Corozao</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <header class="navbar navbar-dark shadow-sm" style="background-color: #173b65">
     <div class="container-xxl">
         <a class="navbar-brand fw-semibold" href="/">Corozao</a>
@@ -639,7 +648,8 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
                                 <tr>
                                     <td>
                                         <strong><?= h($fila['producto_nombre']) ?></strong><?= $fila['marca'] ? ' · ' . h($fila['marca']) : '' ?><br>
-                                        <span><?= h($fila['presentacion_nombre']) ?> · <?= h($fila['unidades_base']) ?> unidades base</span><br>
+                                        <small class="text-body-secondary">Contenido: <?= h($fila['contenido'] ?: 'Sin especificar') ?></small><br>
+                                        <span><?= h($fila['presentacion_nombre']) ?> · <?= h(unidadesVisual((string) $fila['unidades_base'])) ?> unidades base</span><br>
                                         <small class="text-body-secondary"><?= h($fila['categoria_nombre'] ?? 'Sin categoría') ?> · Producto #<?= h($fila['producto_id']) ?></small>
                                     </td>
                                     <td>
@@ -654,7 +664,7 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
                                         <?php elseif ($fila['precio_bodega_id'] === null): ?>
                                             <span class="text-body-secondary">Sin precio vigente</span>
                                         <?php else: ?>
-                                            <strong>$<?= h(decimalVisual((string) $fila['precio_venta'], 4)) ?></strong><br>
+                                            <strong>$<?= h(decimalVisual((string) $fila['precio_venta'], 2)) ?></strong><br>
                                             <?php if ($fila['tarifa_iva'] === null): ?>
                                                 <span class="badge text-bg-warning">IVA pendiente</span>
                                             <?php else: ?>
@@ -666,7 +676,7 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
                                     <td>
                                         <div class="d-flex flex-column gap-2">
                                             <?php if ($puedeAdministrar): ?>
-                                                <form method="post" action="/comercial_bodegas.php?bodega=<?= h($bodegaActivaId) ?>" onsubmit="return confirm('¿Cambiar la habilitación solo en esta bodega?');">
+                                                <form method="post" action="/comercial_bodegas.php?<?= h(http_build_query(['bodega' => $bodegaActivaId, 'q' => $buscar, 'categoria' => $categoriaId ?? '', 'estado' => $estado, 'pagina' => $pagina])) ?>" onsubmit="return confirm('¿Cambiar la habilitación solo en esta bodega?');">
                                                     <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
                                                     <input type="hidden" name="bodega_id" value="<?= h($bodegaActivaId) ?>">
                                                     <input type="hidden" name="presentacion_id" value="<?= h($fila['presentacion_id']) ?>">
@@ -682,13 +692,13 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
                                                     <?php if ($precioAbiertoDuplicado): ?>
                                                         <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Resolver precios duplicados</button>
                                                     <?php else: ?>
-                                                        <form method="post" action="/comercial_bodegas.php?bodega=<?= h($bodegaActivaId) ?>" onsubmit="return confirm('Se cerrará la vigencia del precio actual y se creará un nuevo registro histórico. ¿Continuar?');">
+                                                        <form method="post" action="/comercial_bodegas.php?<?= h(http_build_query(['bodega' => $bodegaActivaId, 'q' => $buscar, 'categoria' => $categoriaId ?? '', 'estado' => $estado, 'pagina' => $pagina])) ?>" onsubmit="return confirm('Se cerrará la vigencia del precio actual y se creará un nuevo registro histórico. ¿Continuar?');">
                                                             <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
                                                             <input type="hidden" name="accion" value="precio">
                                                             <input type="hidden" name="bodega_id" value="<?= h($bodegaActivaId) ?>">
                                                             <input type="hidden" name="presentacion_id" value="<?= h($fila['presentacion_id']) ?>">
                                                             <label class="form-label small mb-1" for="precio-<?= h($fila['presentacion_id']) ?>">Nuevo precio</label>
-                                                            <input class="form-control form-control-sm mb-2" id="precio-<?= h($fila['presentacion_id']) ?>" name="precio_venta" type="number" min="0.0001" max="99999999.9999" step="0.0001" required>
+                                                            <input class="form-control form-control-sm mb-2" id="precio-<?= h($fila['presentacion_id']) ?>" name="precio_venta" type="number" min="0.01" max="99999999.99" step="0.01" required>
                                                             <label class="form-label small mb-1" for="incluye-<?= h($fila['presentacion_id']) ?>">Tratamiento IVA</label>
                                                             <select class="form-select form-select-sm mb-2" id="incluye-<?= h($fila['presentacion_id']) ?>" name="precio_incluye_iva" required>
                                                                 <option value="">Selecciona</option>
@@ -735,7 +745,7 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
                                 <tbody>
                                 <?php foreach ($historial as $registro): ?>
                                     <tr>
-                                        <td>$<?= h(decimalVisual((string) $registro['precio_venta'], 4)) ?></td>
+                                        <td>$<?= h(decimalVisual((string) $registro['precio_venta'], 2)) ?></td>
                                         <td>
                                             <?php if ($registro['tarifa_iva'] === null): ?>IVA pendiente<?php else: ?><?= h(decimalVisual((string) $registro['tarifa_iva'], 2)) ?>%<?php endif; ?>
                                             · <?= (int) $registro['precio_incluye_iva'] === 1 ? 'incluye IVA' : 'sin IVA' ?>
@@ -754,5 +764,6 @@ if ($bodegaActivaId !== null && $historialId !== false && $historialId !== null 
         <?php endif; ?>
     <?php endif; ?>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

@@ -136,8 +136,10 @@ $autenticado = $usuarioActual !== null;
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <title>Corozao | Sistema de inventario y ventas</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body class="bg-body-tertiary <?= $autenticado ? '' : 'brand-login' ?>" data-corozao-role="<?= escapar((string)($_SESSION['rol'] ?? '')) ?>">
 <?php if ($autenticado): ?>
 <nav class="navbar bg-white border-bottom">
   <div class="container-xxl">
@@ -214,6 +216,18 @@ $autenticado = $usuarioActual !== null;
             <h2 id="modulo-asignaciones" class="h5">Acceso por bodega</h2>
             <p class="text-body-secondary flex-grow-1">Asigna o revoca el acceso de cajeros y meseros a bodegas.</p>
             <a class="btn btn-outline-primary" href="/asignaciones_bodega.php">Gestionar asignaciones</a>
+          </div>
+        </section>
+      </div>
+    <?php endif; ?>
+    <?php if (corozao_rol_puede((string) $_SESSION['rol'], 'users.manage')): ?>
+      <div class="col-12 col-md-6 col-xl-4">
+        <section class="card h-100 shadow-sm" aria-labelledby="modulo-usuarios">
+          <div class="card-body d-flex flex-column p-4">
+            <span class="badge text-bg-primary align-self-start mb-3">Administración</span>
+            <h2 id="modulo-usuarios" class="h5">Usuarios</h2>
+            <p class="text-body-secondary flex-grow-1">Crea cuentas, administra roles y estados y restablece contraseñas.</p>
+            <a class="btn btn-outline-primary" href="/usuarios.php">Administrar usuarios</a>
           </div>
         </section>
       </div>
@@ -343,9 +357,9 @@ $autenticado = $usuarioActual !== null;
   <section class="card shadow-sm w-100" style="max-width: 32rem" aria-labelledby="titulo-principal">
     <div class="card-body p-4 p-md-5">
       <div class="mb-4">
-        <span class="badge text-bg-primary mb-3">Corozao</span>
-        <h1 id="titulo-principal" class="h3 mb-2">Sistema de inventario y ventas</h1>
-        <p class="text-body-secondary mb-0">Acceso seguro al sistema</p>
+        <img class="brand-login-logo" src="/assets/img/brand/corozao-logo.jpeg" alt="Corozao by Mi Sub">
+        <h1 id="titulo-principal" class="h3 mb-2 brand-login-title">Sistema de inventario y ventas</h1>
+        <p class="text-body-secondary mb-0 brand-login-copy">Acceso seguro al sistema</p>
       </div>
       <?php if ($error !== ''): ?>
         <div class="alert alert-danger" role="alert"><?= escapar($error) ?></div>
@@ -372,5 +386,6 @@ $autenticado = $usuarioActual !== null;
 </main>
 <?php endif; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/assets/brand.js" defer></script>
 </body>
 </html>

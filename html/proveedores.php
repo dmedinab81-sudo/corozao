@@ -447,9 +447,10 @@ if ($modo === 'editar' && $proveedorId !== null && $_SERVER['REQUEST_METHOD'] !=
         $stmt = $pdo->prepare(
             'SELECT pp.proveedor_producto_id, pp.codigo_producto_proveedor,
                     pp.es_proveedor_preferido, pp.plazo_entrega_dias, pp.observaciones,
-                    p.producto_id, p.nombre AS producto_nombre, p.marca, p.activo AS producto_activo
+                    p.producto_id, p.nombre AS producto_nombre, p.marca, p.contenido, c.nombre AS producto_categoria, p.activo AS producto_activo
              FROM proveedor_productos pp
              INNER JOIN productos p ON p.producto_id = pp.producto_id
+             LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
              WHERE pp.proveedor_id = :id
              ORDER BY p.nombre, p.producto_id'
         );
@@ -458,8 +459,9 @@ if ($modo === 'editar' && $proveedorId !== null && $_SERVER['REQUEST_METHOD'] !=
 
         if ((int) $proveedor['activo'] === 1) {
             $productosDisponibles = $pdo->query(
-                'SELECT producto_id, nombre, marca FROM productos
-                 WHERE activo = 1 ORDER BY nombre, producto_id LIMIT 1000'
+                'SELECT p.producto_id, p.nombre, p.marca, p.contenido, c.nombre AS categoria
+                 FROM productos p LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+                 WHERE p.activo = 1 ORDER BY p.nombre, p.producto_id LIMIT 1000'
             )->fetchAll();
         }
         if ($auditoriaDisponible) {
@@ -537,8 +539,10 @@ if ($modo === 'listar') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Proveedores | Corozao</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <header class="navbar navbar-dark shadow-sm" style="background-color: #173b65">
     <div class="container-xxl">
         <a class="navbar-brand fw-semibold" href="/">Corozao</a>
@@ -685,7 +689,7 @@ if ($modo === 'listar') {
                         <tbody>
                         <?php foreach ($productosRelacionados as $relacion): ?>
                             <tr>
-                                <td><?= h($relacion['producto_nombre']) ?><?= $relacion['marca'] ? ' · ' . h($relacion['marca']) : '' ?><?= (int) $relacion['producto_activo'] === 0 ? ' (inactivo)' : '' ?></td>
+                                <td><?= h($relacion['producto_nombre']) ?><?= $relacion['marca'] ? ' · ' . h($relacion['marca']) : '' ?><br><small>Contenido: <?= h($relacion['contenido'] ?: 'Sin especificar') ?> · Tipo/categoría: <?= h($relacion['producto_categoria'] ?? 'Sin categoría') ?></small><?= (int) $relacion['producto_activo'] === 0 ? ' (inactivo)' : '' ?></td>
                                 <td><?= h($relacion['codigo_producto_proveedor'] ?? '—') ?></td>
                                 <td><?= (int) $relacion['es_proveedor_preferido'] === 1 ? 'Sí' : 'No' ?></td>
                                 <td><?= $relacion['plazo_entrega_dias'] === null ? '—' : h($relacion['plazo_entrega_dias']) . ' días' ?></td>
@@ -708,7 +712,7 @@ if ($modo === 'listar') {
                                 <select class="form-select" id="producto_id" name="producto_id" required>
                                     <option value="">Selecciona</option>
                                     <?php foreach ($productosDisponibles as $productoOpcion): ?>
-                                        <option value="<?= h($productoOpcion['producto_id']) ?>"><?= h($productoOpcion['nombre']) ?><?= $productoOpcion['marca'] ? ' · ' . h($productoOpcion['marca']) : '' ?></option>
+                                        <option value="<?= h($productoOpcion['producto_id']) ?>"><?= h($productoOpcion['nombre']) ?><?= $productoOpcion['marca'] ? ' · ' . h($productoOpcion['marca']) : '' ?> · Contenido: <?= h($productoOpcion['contenido'] ?: 'Sin especificar') ?> · Tipo/categoría: <?= h($productoOpcion['categoria'] ?: 'Sin categoría') ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -718,7 +722,7 @@ if ($modo === 'listar') {
                             </div>
                             <div class="col-12 col-md-6 col-lg-2">
                                 <label class="form-label" for="plazo_entrega_dias">Plazo (días)</label>
-                                <input class="form-control" type="number" min="0" max="65535" id="plazo_entrega_dias" name="plazo_entrega_dias">
+                                <input class="form-control" type="number" min="0" max="65535" step="1" id="plazo_entrega_dias" name="plazo_entrega_dias">
                             </div>
                             <div class="col-12 col-lg-2">
                                 <div class="form-check mb-2">
@@ -823,5 +827,6 @@ if ($modo === 'listar') {
         </section>
     <?php endif; ?>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

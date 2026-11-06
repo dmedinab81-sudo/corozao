@@ -39,9 +39,9 @@ function corozao_ajustes_instalados(PDO $pdo): bool
 function corozao_ajuste_cantidad(string $valor): string
 {
     $valor = trim($valor);
-    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})(?:\.[0-9]{1,3})?$/', $valor)
+    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})$/', $valor)
         || trim(str_replace(['0', '.'], '', $valor)) === '') {
-        throw new DomainException('La cantidad debe ser positiva y tener hasta tres decimales.');
+        throw new DomainException('La cantidad debe ser un número entero positivo.');
     }
     [$entero, $fraccion] = array_pad(explode('.', $valor, 2), 2, '');
     $entero = ltrim($entero, '0');

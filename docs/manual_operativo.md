@@ -28,7 +28,7 @@ Las cuentas y nombres de rol no se cambian mediante este manual. Los permisos de
 
 En **Catálogo de productos** (`/productos.php`) busca por nombre, marca o código y filtra por categoría o estado. Abre el detalle para revisar presentaciones, códigos y datos comerciales visibles según el rol.
 
-La pantalla actual es de consulta. La creación o edición de productos, categorías, presentaciones y códigos no está expuesta como flujo operativo en esta versión; requiere que esos registros ya existan.
+El administrador también puede crear y editar productos, cambiar su estado y añadir presentaciones o códigos desde el detalle. Para crear un producto se registra su primera presentación; el código es opcional. La desactivación conserva el registro, sus presentaciones, códigos, precios e historial. Las presentaciones se pueden desactivar sin borrarlas. Cajeros y meseros tienen acceso de consulta.
 
 ### Proveedores
 
@@ -55,16 +55,20 @@ El sistema no permite agregar el producto a un pedido si está inactivo, sin val
 
 En **Acceso por bodega** (`/asignaciones_bodega.php`), el administrador asigna una bodega activa a una cuenta existente. Una asignación inactiva se puede reactivar. Desactivar una asignación retira el acceso operativo a esa bodega; no elimina al usuario ni sus registros.
 
+### Administrar cuentas de usuario
+
+En **Usuarios** (`/usuarios.php`), el administrador puede buscar y filtrar cuentas por nombre, usuario, rol y estado; crear cuentas; cambiar nombres, usuario, rol o estado; y asignar una contraseña nueva desde el formulario separado. La contraseña no se muestra ni se puede recuperar. Se exige confirmación, mínimo 12 caracteres y máximo 72 bytes. No se puede dejar al sistema sin un administrador activo.
+
 ## 4. Compras e ingreso de mercadería
 
 En **Compras e ingresos** (`/compras.php`), el administrador sigue este flujo:
 
-1. Selecciona proveedor y bodega de destino.
-2. Agrega hasta cinco presentaciones, cantidades y costo unitario por presentación. La presentación determina el producto y su conversión a unidades base.
+1. Selecciona proveedor, bodega de destino y fecha/hora del documento.
+2. Busca productos por código, nombre, marca, categoría, contenido o presentación; agrega líneas con cantidades y costo unitario por presentación antes de IVA. Registra la tarifa separada (ingresa 0 si no aplica). El sistema muestra el impuesto aparte y suma costo neto e IVA en el total de compra.
 3. Guarda la compra como **BORRADOR**. Se puede editar mientras siga en ese estado.
 4. Revisa proveedor, bodega, cantidades y costos; selecciona **Confirmar e ingresar**.
 
-Al confirmar, en una transacción se crea el movimiento de entrada, se actualiza el saldo y se registra auditoría. La compra confirmada no se edita ni elimina desde el flujo normal. Si hay un error, solicita una corrección administrativa auditada.
+Al confirmar, en una transacción se crea el movimiento de entrada, se actualiza el saldo y se registra auditoría. El costo neto, sin IVA, alimenta la valoración del Kardex; el IVA queda separado en el detalle de compra. La compra confirmada no se edita ni elimina. Si hay que deshacerla por completo, un administrador puede usar **Revertir** después de aplicar `migrations/20261101_reversiones_compras.sql` e indicar un motivo. Se crea una salida con cantidades y costos netos del movimiento original, se actualiza el saldo y ambas operaciones quedan auditadas; la compra original permanece visible. El sistema bloquea la reversión si encuentra movimientos posteriores o pendientes para esos productos en esa bodega, o si el saldo es insuficiente. Si hay varias compras de prueba para los mismos productos, se deben revertir de la más reciente a la más antigua. La reversión completa es para anular el efecto de una compra: no registra una devolución de dinero o crédito del proveedor.
 
 ## 5. Existencias, Kardex y movimientos
 
@@ -103,7 +107,7 @@ En **Reportes, conciliación y conteos** (`/reportes.php`), el administrador:
 2. Añade cada producto y registra la cantidad física. El sistema captura el saldo teórico existente en ese instante y calcula la diferencia.
 3. Cierra el conteo cuando haya al menos una lectura.
 
-El conteo es una lectura de control: **no modifica existencias**. Al cerrar, no se pueden añadir más lecturas.
+El conteo es una lectura de control: **no modifica existencias**. Al cerrar, no se pueden añadir más lecturas. El administrador puede corregir o retirar una lectura desde el detalle; cada cambio queda en auditoría. Una línea ya usada para una carga inicial queda bloqueada para proteger el saldo cargado.
 
 ### Autorizar una carga inicial
 
@@ -189,4 +193,14 @@ En el filtro de usuario del bloque de devoluciones, el usuario corresponde a qui
 
 ## 11. Funciones fuera de la interfaz actual
 
-Esta versión no incorpora la integración con el SRI ni pantallas de alta/edición para productos, categorías, presentaciones, códigos, bodegas o cuentas de usuario. El panel y los permisos no sustituyen esos flujos administrativos. No completes esos pasos editando datos directamente en producción sin el procedimiento correspondiente.
+Esta versión no incorpora la integración con el SRI ni pantallas de alta/edición para categorías, bodegas o cuentas iniciales del sistema. El módulo de usuarios administra cuentas existentes y nuevas, pero no configura el servidor ni la base de datos. No completes esos pasos editando datos directamente en producción sin el procedimiento correspondiente.
+
+## 12. Selector dinámico y venta directa
+
+En pedidos y compras, escribe al menos dos caracteres del código, nombre, marca, categoría, contenido o presentación. Elige un resultado, agrega cantidad y, para compras, registra el costo unitario de adquisición. Puedes ajustar cantidades y retirar líneas antes de guardar el borrador. Los precios de venta no se usan como costo de compra.
+
+El cajero puede iniciar una venta directa desde **Ventas y caja** si su rol tiene el permiso `sales.direct.create`, la bodega está asignada y existe una caja abierta para esa bodega. Añade presentaciones disponibles, registra cantidades, elige consumidor final o ingresa los datos del destinatario, y completa uno o varios medios de pago. Al confirmar, el servidor valida precio, IVA y saldo de nuevo; venta, pagos, inventario, movimiento y auditoría se confirman juntos.
+
+Después de registrar la venta, usa **Imprimir comprobante interno**; también puedes imprimir cualquiera de tus ventas recientes desde su fila. La vista muestra cliente, líneas, IVA, descuento y medios de pago, y permite imprimir o guardar como PDF desde el navegador. Es un documento interno de control: no es factura electrónica ni comprobante tributario, y no se envía al SRI. Cada usuario solo puede abrir el comprobante de sus propias ventas.
+
+La venta directa requiere aplicar manualmente `migrations/20261101_ventas_directas.sql`. La página mantiene esta modalidad deshabilitada mientras esa migración no esté instalada. La búsqueda de compra no muestra el precio de venta. El desglose del IVA de compra requiere aplicar manualmente `migrations/20261102_compras_iva_separado.sql`; las compras anteriores quedan sin desglose histórico.

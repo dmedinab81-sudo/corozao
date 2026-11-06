@@ -231,8 +231,10 @@ function h(mixed $value): string
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Asignaciones por bodega | Corozao</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <header class="navbar navbar-dark shadow-sm" style="background-color: #173b65">
     <div class="container-xxl">
         <a class="navbar-brand fw-semibold" href="/">Corozao</a>
@@ -329,5 +331,6 @@ function h(mixed $value): string
         </div>
     </section>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

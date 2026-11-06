@@ -1,0 +1,31 @@
+/* Formato térmico para rollo continuo TSC: ancho 100 mm, área útil aproximada 94 mm. */
+@media print {
+  @page { size: 100mm 150mm; margin: 3mm; }
+  html, body { width: 94mm !important; min-width: 94mm !important; margin: 0 !important; padding: 0 !important; background: #fff !important; color: #090E19 !important; font: 9pt/1.25 Arial, Helvetica, sans-serif !important; }
+  .toolbar { display: none !important; }
+  .sheet { width: 94mm !important; max-width: 94mm !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+  .top { align-items: flex-start; gap: 2mm; padding-bottom: 2mm; border-bottom: 1px solid #090E19; }
+  .print-brand { gap: 2mm !important; }
+  .print-brand img { width: 13mm !important; height: 13mm !important; border-radius: 1mm !important; }
+  .print-brand .brand { font-size: 11pt !important; }
+  .top > div:last-child { text-align: right; overflow-wrap: anywhere; font-size: 8pt; }
+  .notice { margin: 2mm 0; padding: 1.5mm; font-size: 7pt; line-height: 1.15; }
+  .parties { grid-template-columns: 1fr 1fr !important; gap: 1.5mm; margin: 2mm 0 !important; }
+  .box { min-width: 0; padding: 1.5mm !important; border-radius: 0 !important; overflow-wrap: anywhere; font-size: 7.5pt; }
+  .box h2 { margin-bottom: 1mm !important; font-size: 7pt !important; }
+  .box p { margin: .5mm 0 !important; }
+  .table-wrap { overflow: visible !important; }
+  table { width: 100% !important; table-layout: fixed; margin-top: 1.5mm !important; font-size: 7.3pt; }
+  th, td { padding: 1mm .7mm !important; border-bottom: .2mm solid #c9cdd2; overflow-wrap: anywhere; }
+  th { font-size: 6.5pt !important; }
+  .description { min-width: 0 !important; width: 37%; }
+  th:nth-child(2) { width: 11%; } th:nth-child(3) { width: 15%; } th:nth-child(4) { width: 21%; } th:nth-child(5) { width: 16%; }
+  .num { white-space: nowrap; }
+  .totals { width: 75% !important; margin: 2mm 0 0 auto !important; }
+  .totals td { padding: .8mm !important; }
+  .grand td { padding-top: 1.5mm !important; font-size: 10pt !important; }
+  .payments { margin-top: 2mm !important; }
+  .payments h2 { margin: 0; font-size: 8pt !important; }
+  .footer { margin-top: 2mm !important; padding-top: 1.5mm !important; font-size: 6.5pt !important; }
+  tr, .box, .notice { break-inside: avoid; page-break-inside: avoid; }
+}

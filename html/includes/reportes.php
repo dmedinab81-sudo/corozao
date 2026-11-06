@@ -13,11 +13,102 @@ function corozao_reportes_instalados(PDO $pdo): bool
 function corozao_conteo_milesimas(string $valor): int
 {
     $valor = trim($valor);
-    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})(?:\.[0-9]{1,3})?$/', $valor)) {
-        throw new DomainException('La cantidad física debe ser un valor no negativo con hasta tres decimales.');
+    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})$/', $valor)) {
+        throw new DomainException('La cantidad física debe ser un número entero no negativo.');
     }
-    [$entero, $fraccion] = array_pad(explode('.', $valor, 2), 2, '');
-    return ((int) $entero * 1000) + (int) str_pad($fraccion, 3, '0');
+    return (int) $valor * 1000;
+}
+
+/** Convierte saldos DECIMAL existentes; la entrada física del usuario sigue siendo entera. */
+function corozao_conteo_saldo_milesimas(string $valor): int
+{
+    if (!preg_match('/^(0|[1-9][0-9]{0,10})(?:\.([0-9]{1,3}))?$/D', $valor, $partes)) {
+        throw new DomainException('El saldo teórico tiene un formato no válido.');
+    }
+    return (int) $partes[1] * 1000 + (int) str_pad($partes[2] ?? '', 3, '0');
+}
+
+function corozao_conteo_detalle_bloquear(PDO $pdo, int $detalleId): array
+{
+    $stmt = $pdo->prepare('SELECT conteo_id FROM conteo_inventario_detalles WHERE conteo_detalle_id=:detalle');
+    $stmt->execute(['detalle' => $detalleId]);
+    $conteoId = $stmt->fetchColumn();
+    if (!$conteoId) throw new DomainException('La lectura del conteo no existe.');
+    $stmt = $pdo->prepare('SELECT estado FROM conteos_inventario WHERE conteo_id=:conteo FOR UPDATE');
+    $stmt->execute(['conteo' => $conteoId]);
+    $estado = $stmt->fetchColumn();
+    if (!in_array($estado, ['ABIERTO', 'CERRADO'], true)) throw new DomainException('La sesión de conteo no existe.');
+    $stmt = $pdo->prepare('SELECT conteo_detalle_id,conteo_id,producto_id,cantidad_teorica,cantidad_fisica,diferencia
+        FROM conteo_inventario_detalles WHERE conteo_detalle_id=:detalle AND conteo_id=:conteo FOR UPDATE');
+    $stmt->execute(['detalle' => $detalleId, 'conteo' => $conteoId]);
+    $detalle = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$detalle) throw new DomainException('La lectura del conteo ya no está disponible.');
+    $detalle['estado_conteo'] = $estado;
+    return $detalle;
+}
+
+function corozao_conteo_detalle_cargado(PDO $pdo, int $detalleId): bool
+{
+    $stmt = $pdo->query('SELECT COUNT(*) FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'cargas_inventario_inicial_detalles\'');
+    if ((int) $stmt->fetchColumn() !== 1) return false;
+    $stmt = $pdo->prepare('SELECT 1 FROM cargas_inventario_inicial_detalles WHERE conteo_detalle_id=:detalle LIMIT 1');
+    $stmt->execute(['detalle' => $detalleId]);
+    return $stmt->fetchColumn() !== false;
+}
+
+function corozao_conteo_detalle_modificar(PDO $pdo, int $detalleId, int $conteoId, int $usuarioId, string $fisico): void
+{
+    $usuario = corozao_exigir_permiso($pdo, 'inventory.physical_count.modify');
+    if ($detalleId < 1 || $conteoId < 1 || $usuarioId !== (int) $usuario['usuario_id']) throw new DomainException('La solicitud no es válida.');
+    $fisicoM = corozao_conteo_milesimas($fisico);
+    $pdo->beginTransaction();
+    try {
+        $detalle = corozao_conteo_detalle_bloquear($pdo, $detalleId);
+        if ((int) $detalle['conteo_id'] !== $conteoId) throw new DomainException('La lectura no pertenece a este conteo.');
+        if (corozao_conteo_detalle_cargado($pdo, $detalleId)) {
+            throw new DomainException('La lectura ya se usó en una carga inicial y no puede modificarse.');
+        }
+        $teoricoM = corozao_conteo_saldo_milesimas((string) $detalle['cantidad_teorica']);
+        $nuevaDiferencia = corozao_conteo_formato($fisicoM - $teoricoM);
+        $stmt = $pdo->prepare('UPDATE conteo_inventario_detalles SET cantidad_fisica=:fisico,diferencia=:diferencia
+            WHERE conteo_detalle_id=:detalle');
+        $stmt->execute(['fisico' => corozao_conteo_formato($fisicoM), 'diferencia' => $nuevaDiferencia, 'detalle' => $detalleId]);
+        corozao_registrar_auditoria($pdo, $usuarioId, 'MODIFICAR', 'conteo_inventario_detalles', $detalleId,
+            ['conteo_id' => (int) $detalle['conteo_id'], 'producto_id' => (int) $detalle['producto_id'],
+                'cantidad_teorica' => (string) $detalle['cantidad_teorica'], 'cantidad_fisica' => (string) $detalle['cantidad_fisica'],
+                'diferencia' => (string) $detalle['diferencia']],
+            ['cantidad_fisica' => corozao_conteo_formato($fisicoM), 'diferencia' => $nuevaDiferencia]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+}
+
+function corozao_conteo_detalle_eliminar(PDO $pdo, int $detalleId, int $conteoId, int $usuarioId): void
+{
+    $usuario = corozao_exigir_permiso($pdo, 'inventory.physical_count.remove');
+    if ($detalleId < 1 || $conteoId < 1 || $usuarioId !== (int) $usuario['usuario_id']) throw new DomainException('La solicitud no es válida.');
+    $pdo->beginTransaction();
+    try {
+        $detalle = corozao_conteo_detalle_bloquear($pdo, $detalleId);
+        if ((int) $detalle['conteo_id'] !== $conteoId) throw new DomainException('La lectura no pertenece a este conteo.');
+        if (corozao_conteo_detalle_cargado($pdo, $detalleId)) {
+            throw new DomainException('La lectura ya se usó en una carga inicial y no puede retirarse.');
+        }
+        corozao_registrar_auditoria($pdo, $usuarioId, 'DESACTIVAR', 'conteo_inventario_detalles', $detalleId,
+            ['conteo_id' => (int) $detalle['conteo_id'], 'producto_id' => (int) $detalle['producto_id'],
+                'cantidad_teorica' => (string) $detalle['cantidad_teorica'], 'cantidad_fisica' => (string) $detalle['cantidad_fisica'],
+                'diferencia' => (string) $detalle['diferencia']], ['estado' => 'RETIRADO_DEL_CONTEO']);
+        $stmt = $pdo->prepare('DELETE FROM conteo_inventario_detalles WHERE conteo_detalle_id=:detalle');
+        $stmt->execute(['detalle' => $detalleId]);
+        if ($stmt->rowCount() !== 1) throw new DomainException('No se pudo retirar la lectura del conteo.');
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
 }
 
 function corozao_conteo_formato(int $milesimas): string
@@ -70,7 +161,7 @@ function corozao_conteo_registrar(PDO $pdo, int $conteoId, int $productoId, int 
         $stmt->execute(['bodega' => $conteo['bodega_id'], 'producto' => $productoId]);
         $saldo = $stmt->fetchColumn();
         $teorico = $saldo === false ? '0.000' : (string) $saldo;
-        $teoricoM = corozao_conteo_milesimas($teorico);
+        $teoricoM = corozao_conteo_saldo_milesimas($teorico);
         $stmt = $pdo->prepare('INSERT INTO conteo_inventario_detalles
             (conteo_id,producto_id,usuario_id,cantidad_teorica,cantidad_fisica,diferencia)
             VALUES (:conteo,:producto,:usuario,:teorico,:fisico,:diferencia)');

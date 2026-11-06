@@ -84,11 +84,16 @@ try {
         corozao_exigir_permiso_en_bodega($pdo, $permisoBodega, $bodegaActualId);
 
         if ($error === null && $modo === 'existencias') {
-            $sql = 'SELECT p.producto_id, p.nombre AS producto, s.cantidad_base
+            $sql = 'SELECT p.producto_id, p.nombre AS producto, p.contenido, c.nombre AS categoria, s.cantidad_base
                     FROM inventario_saldos s
                     INNER JOIN productos p ON p.producto_id = s.producto_id
-                    WHERE s.bodega_id = :bodega AND p.nombre LIKE :buscar';
-            $params = ['bodega' => $bodegaActualId, 'buscar' => '%' . $buscar . '%'];
+                    LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+                    WHERE s.bodega_id = :bodega
+                      AND (p.nombre LIKE :buscar_nombre OR p.contenido LIKE :buscar_contenido
+                           OR c.nombre LIKE :buscar_categoria)';
+            $termino = '%' . $buscar . '%';
+            $params = ['bodega' => $bodegaActualId, 'buscar_nombre' => $termino,
+                'buscar_contenido' => $termino, 'buscar_categoria' => $termino];
             $sql .= ' ORDER BY p.nombre, p.producto_id LIMIT 500';
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -121,7 +126,8 @@ try {
                          ELSE m.fecha_movimiento END'
                 : 'm.fecha_movimiento';
             $sql = 'SELECT m.movimiento_id, m.tipo_movimiento, m.fecha_movimiento,
-                           m.observaciones, p.producto_id, p.nombre AS producto,
+                           m.observaciones, p.producto_id, p.nombre AS producto, p.contenido,
+                           c.nombre AS categoria,
                            d.cantidad_base, d.costo_unitario,
                            CASE WHEN m.bodega_destino_id = :bodega_signo
                                 THEN d.cantidad_base ELSE -d.cantidad_base END AS variacion,
@@ -133,6 +139,7 @@ try {
                     FROM movimientos_inventario m
                     INNER JOIN detalle_movimiento_inventario d ON d.movimiento_id = m.movimiento_id
                     INNER JOIN productos p ON p.producto_id = d.producto_id
+                    LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
                     LEFT JOIN bodegas bo ON bo.bodega_id = m.bodega_origen_id
                     LEFT JOIN bodegas bd ON bd.bodega_id = m.bodega_destino_id
                     LEFT JOIN usuarios uc ON uc.usuario_id = m.usuario_id
@@ -144,12 +151,16 @@ try {
                         ? ' OR (m.tipo_movimiento = \'TRANSFERENCIA\' AND m.estado = \'EN_TRANSITO\'
                              AND m.bodega_origen_id = :bodega_transito)'
                         : '') . ')
-                      AND p.nombre LIKE :buscar';
+                      AND (p.nombre LIKE :buscar_nombre OR p.contenido LIKE :buscar_contenido
+                           OR c.nombre LIKE :buscar_categoria)';
+            $termino = '%' . $buscar . '%';
             $params = [
                 'bodega_signo' => $bodegaActualId,
                 'bodega_origen' => $bodegaActualId,
                 'bodega_destino' => $bodegaActualId,
-                'buscar' => '%' . $buscar . '%',
+                'buscar_nombre' => $termino,
+                'buscar_contenido' => $termino,
+                'buscar_categoria' => $termino,
             ];
             if ($dosEtapas) {
                 $params['fecha_origen'] = $bodegaActualId;
@@ -192,8 +203,10 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <title>Corozao | Inventario</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <nav class="navbar bg-white border-bottom"><div class="container-xxl">
     <a class="navbar-brand fw-semibold" href="/">Corozao</a>
     <span class="badge text-bg-primary"><?= inventario_h($usuario['rol']) ?></span>
@@ -217,7 +230,7 @@ try {
                     <?php foreach ($bodegas as $bodega): ?><option value="<?= (int) $bodega['bodega_id'] ?>" <?= (int) $bodega['bodega_id'] === $bodegaActualId ? 'selected' : '' ?>><?= inventario_h($bodega['nombre']) ?></option><?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-12 col-md-4"><label class="form-label" for="q">Producto</label><input class="form-control" id="q" name="q" maxlength="100" value="<?= inventario_h($buscar) ?>" placeholder="Buscar por nombre"></div>
+            <div class="col-12 col-md-4"><label class="form-label" for="q">Producto</label><input class="form-control" id="q" name="q" maxlength="100" value="<?= inventario_h($buscar) ?>" placeholder="Buscar por nombre, contenido o categoría"></div>
             <?php if ($modo === 'kardex'): ?>
                 <div class="col-6 col-md-2"><label class="form-label" for="desde">Desde</label><input class="form-control" type="date" id="desde" name="desde" value="<?= inventario_h($desde) ?>"></div>
                 <div class="col-6 col-md-2"><label class="form-label" for="hasta">Hasta</label><input class="form-control" type="date" id="hasta" name="hasta" value="<?= inventario_h($hasta) ?>"></div>
@@ -228,22 +241,23 @@ try {
     <?php if ($error === null): ?>
         <section class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
             <thead class="table-light"><tr>
-                <?php if ($modo === 'kardex'): ?><th>Fecha</th><th>Movimiento</th><th>Producto</th><th class="text-end">Variación</th><th>Origen</th><th>Destino</th><th>Registrado por</th><th>Confirmado por</th><th>Observaciones</th>
-                <?php else: ?><th>Producto</th><th class="text-end">Existencia base</th><?php endif; ?>
+                <?php if ($modo === 'kardex'): ?><th>Fecha</th><th>Movimiento</th><th>Producto / contenido</th><th>Categoría</th><th class="text-end">Variación</th><th>Origen</th><th>Destino</th><th>Registrado por</th><th>Confirmado por</th><th>Observaciones</th>
+                <?php else: ?><th>Producto / contenido</th><th>Categoría</th><th class="text-end">Existencia base</th><?php endif; ?>
             </tr></thead><tbody>
             <?php foreach ($filas as $fila): ?><tr>
                 <?php if ($modo === 'kardex'): ?>
-                    <td><?= inventario_h($fila['fecha_efectiva']) ?></td><td><?= inventario_h($fila['tipo_movimiento']) ?><?= $fila['estado_movimiento'] === 'EN_TRANSITO' ? ' (EN TRÁNSITO)' : '' ?> #<?= (int) $fila['movimiento_id'] ?></td><td><?= inventario_h($fila['producto']) ?></td>
+                    <td><?= inventario_h($fila['fecha_efectiva']) ?></td><td><?= inventario_h($fila['tipo_movimiento']) ?><?= $fila['estado_movimiento'] === 'EN_TRANSITO' ? ' (EN TRÁNSITO)' : '' ?> #<?= (int) $fila['movimiento_id'] ?></td><td><?= inventario_h($fila['producto']) ?><br><small class="text-body-secondary">Contenido: <?= inventario_h($fila['contenido'] ?: '—') ?></small></td><td><?= inventario_h($fila['categoria'] ?: 'Sin categoría') ?></td>
                     <td class="text-end <?= str_starts_with((string) $fila['variacion'], '-') ? 'text-danger' : 'text-success' ?>"><?= inventario_decimal($fila['variacion']) ?></td>
                     <td><?= inventario_h($fila['bodega_origen'] ?? '—') ?></td><td><?= inventario_h($fila['bodega_destino'] ?? '—') ?></td>
                     <td><?= inventario_h($fila['usuario_creador'] ?? '—') ?></td><td><?= inventario_h($fila['usuario_confirmador'] ?? '—') ?></td><td><?= inventario_h($fila['observaciones'] ?? '—') ?></td>
-                <?php else: ?><td><?= inventario_h($fila['producto']) ?></td><td class="text-end fw-semibold"><?= inventario_decimal($fila['cantidad_base']) ?></td><?php endif; ?>
+                <?php else: ?><td><?= inventario_h($fila['producto']) ?><br><small class="text-body-secondary">Contenido: <?= inventario_h($fila['contenido'] ?: '—') ?></small></td><td><?= inventario_h($fila['categoria'] ?: 'Sin categoría') ?></td><td class="text-end fw-semibold"><?= inventario_decimal($fila['cantidad_base']) ?></td><?php endif; ?>
             </tr><?php endforeach; ?>
-            <?php if (!$filas): ?><tr><td colspan="9" class="text-center text-body-secondary py-4">No hay resultados para estos filtros.</td></tr><?php endif; ?>
+            <?php if (!$filas): ?><tr><td colspan="<?= $modo === 'kardex' ? 10 : 3 ?>" class="text-center text-body-secondary py-4">No hay resultados para estos filtros.</td></tr><?php endif; ?>
             </tbody>
         </table></div><div class="card-footer bg-white text-body-secondary">Máximo 500 filas por consulta. Las existencias y cantidades se expresan en unidades base.</div></section>
     <?php endif; ?>
     <div class="mt-3"><a href="/" class="btn btn-link px-0">Volver al panel</a></div>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

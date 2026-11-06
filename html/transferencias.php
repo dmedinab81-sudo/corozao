@@ -175,16 +175,19 @@ $claveNueva = transferencia_uuid();
 if ($migracionLista) {
     try {
         $productos = $pdo->query(
-            'SELECT producto_id, nombre FROM productos WHERE activo = 1 ORDER BY nombre, producto_id LIMIT 500'
+            'SELECT p.producto_id,p.nombre,p.contenido,c.nombre AS categoria FROM productos p
+             LEFT JOIN categorias c ON c.categoria_id=p.categoria_id
+             WHERE p.activo = 1 ORDER BY p.nombre, p.producto_id LIMIT 500'
         )->fetchAll(PDO::FETCH_ASSOC);
         $movimientos = $pdo->query(
             'SELECT m.movimiento_id, m.estado, m.fecha_movimiento, m.fecha_despacho, m.fecha_recepcion,
                     m.observaciones, bo.nombre AS bodega_origen, bd.nombre AS bodega_destino,
                     u.nombre_completo AS creador,
-                    (SELECT GROUP_CONCAT(CONCAT(p.nombre, \' × \', d.cantidad_base)
+                    (SELECT GROUP_CONCAT(CONCAT(p.nombre, \' · Contenido: \', COALESCE(NULLIF(p.contenido, \'\'), \'Sin especificar\'), \' · Tipo/categoría: \', COALESCE(c.nombre, \'Sin categoría\'), \' × \', d.cantidad_base)
                          ORDER BY p.nombre SEPARATOR \'; \')
                      FROM detalle_movimiento_inventario d
                      INNER JOIN productos p ON p.producto_id = d.producto_id
+                     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
                      WHERE d.movimiento_id = m.movimiento_id) AS productos
              FROM movimientos_inventario m
              INNER JOIN bodegas bo ON bo.bodega_id = m.bodega_origen_id
@@ -208,8 +211,10 @@ if ($migracionLista) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <title>Corozao | Transferencias</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <nav class="navbar bg-white border-bottom"><div class="container-xxl">
     <a class="navbar-brand fw-semibold" href="/">Corozao</a>
     <span class="badge text-bg-primary"><?= transferencia_h($usuario['rol']) ?></span>
@@ -246,11 +251,11 @@ if ($migracionLista) {
                         <div class="col-12 col-md-8"><label class="visually-hidden" for="producto-<?= $i ?>">Producto <?= $i + 1 ?></label>
                             <select class="form-select" id="producto-<?= $i ?>" name="productos[<?= $i ?>]" aria-label="Producto <?= $i + 1 ?>">
                                 <option value="">Producto <?= $i + 1 ?> (opcional)</option>
-                                <?php foreach ($productos as $producto): ?><option value="<?= (int) $producto['producto_id'] ?>"><?= transferencia_h($producto['nombre']) ?></option><?php endforeach; ?>
+                                <?php foreach ($productos as $producto): ?><option value="<?= (int) $producto['producto_id'] ?>"><?= transferencia_h($producto['nombre']) ?> · Contenido: <?= transferencia_h($producto['contenido'] ?: 'Sin especificar') ?> · Tipo/categoría: <?= transferencia_h($producto['categoria'] ?: 'Sin categoría') ?></option><?php endforeach; ?>
                             </select>
                         </div>
                         <div class="col-12 col-md-4"><label class="visually-hidden" for="cantidad-<?= $i ?>">Cantidad base <?= $i + 1 ?></label>
-                            <input class="form-control" type="number" min="0.001" step="0.001" name="cantidades[<?= $i ?>]" id="cantidad-<?= $i ?>" placeholder="Cantidad base" aria-label="Cantidad <?= $i + 1 ?>">
+                            <input class="form-control" type="number" min="1" step="1" name="cantidades[<?= $i ?>]" id="cantidad-<?= $i ?>" placeholder="Cantidad base" aria-label="Cantidad <?= $i + 1 ?>">
                         </div>
                     <?php endfor; ?>
                     <div class="col-12"><label class="form-label" for="observaciones">Observaciones</label><textarea class="form-control" id="observaciones" name="observaciones" maxlength="500" rows="2"></textarea></div>
@@ -290,5 +295,6 @@ if ($migracionLista) {
         </section>
     <?php endif; ?>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

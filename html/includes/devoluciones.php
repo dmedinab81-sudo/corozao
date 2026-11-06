@@ -13,12 +13,10 @@ function corozao_devoluciones_instaladas(PDO $pdo): bool
 function corozao_devolucion_cantidad(string $valor): int
 {
     $valor = trim($valor);
-    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})(?:\.[0-9]{1,3})?$/', $valor)) {
-        throw new DomainException('La cantidad debe ser positiva y tener hasta tres decimales.');
+    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})$/', $valor)) {
+        throw new DomainException('La cantidad debe ser un número entero positivo.');
     }
-    [$entero, $fraccion] = array_pad(explode('.', $valor, 2), 2, '');
-    $milesimas = ((int)$entero * 1000) + (int)str_pad($fraccion, 3, '0');
-    return $milesimas;
+    return (int)$valor * 1000;
 }
 
 function corozao_devolucion_formato_cantidad(int $milesimas): string

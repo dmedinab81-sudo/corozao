@@ -128,15 +128,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
 if ($listo) {
     try {
         $productos = $pdo->query(
-            'SELECT producto_id, nombre FROM productos WHERE activo = 1 ORDER BY nombre, producto_id LIMIT 500'
+            'SELECT p.producto_id,p.nombre,p.contenido,c.nombre AS categoria FROM productos p
+             LEFT JOIN categorias c ON c.categoria_id=p.categoria_id
+             WHERE p.activo = 1 ORDER BY p.nombre, p.producto_id LIMIT 500'
         )->fetchAll(PDO::FETCH_ASSOC);
         $ajustes = $pdo->query(
             'SELECT m.movimiento_id, m.tipo_movimiento, m.estado, m.fecha_movimiento, m.fecha_confirmacion,
-                    m.observaciones, b.nombre AS bodega, p.nombre AS producto, d.cantidad_base,
+                    m.observaciones, b.nombre AS bodega, p.nombre AS producto, p.contenido, c.nombre AS categoria, d.cantidad_base,
                     u.nombre_completo AS creador, uc.nombre_completo AS confirmador
              FROM movimientos_inventario m
              INNER JOIN detalle_movimiento_inventario d ON d.movimiento_id = m.movimiento_id
              INNER JOIN productos p ON p.producto_id = d.producto_id
+             LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
              INNER JOIN bodegas b ON b.bodega_id = COALESCE(m.bodega_destino_id, m.bodega_origen_id)
              INNER JOIN usuarios u ON u.usuario_id = m.usuario_id
              LEFT JOIN usuarios uc ON uc.usuario_id = m.confirmado_por_usuario_id
@@ -158,8 +161,10 @@ $claveNueva = ajuste_uuid();
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <title>Corozao | Ajustes de inventario</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/img/brand/corozao-mark.svg?v=2">
+    <link rel="stylesheet" href="/assets/css/brand.css">
 </head>
-<body class="bg-body-tertiary">
+<body data-corozao-role="<?= htmlspecialchars((string)($_SESSION['rol'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="bg-body-tertiary">
 <nav class="navbar bg-white border-bottom"><div class="container-xxl">
     <a class="navbar-brand fw-semibold" href="/">Corozao</a>
     <span class="badge text-bg-primary"><?= ajuste_h($usuario['rol']) ?></span>
@@ -194,11 +199,11 @@ $claveNueva = ajuste_uuid();
                 </div>
                 <div class="col-12 col-md-6"><label class="form-label" for="producto">Producto</label>
                     <select class="form-select" id="producto" name="producto_id" required><option value="">Selecciona</option>
-                        <?php foreach ($productos as $producto): ?><option value="<?= (int) $producto['producto_id'] ?>"><?= ajuste_h($producto['nombre']) ?></option><?php endforeach; ?>
+                        <?php foreach ($productos as $producto): ?><option value="<?= (int) $producto['producto_id'] ?>"><?= ajuste_h($producto['nombre']) ?> · Contenido: <?= ajuste_h($producto['contenido'] ?: 'Sin especificar') ?> · Tipo/categoría: <?= ajuste_h($producto['categoria'] ?: 'Sin categoría') ?></option><?php endforeach; ?>
                     </select>
                 </div>
                 <div class="col-12 col-md-6"><label class="form-label" for="cantidad">Cantidad base</label>
-                    <input class="form-control" type="number" id="cantidad" name="cantidad" min="0.001" step="0.001" required>
+                    <input class="form-control" type="number" id="cantidad" name="cantidad" min="1" step="1" required>
                 </div>
                 <div class="col-12"><label class="form-label" for="motivo">Motivo obligatorio</label>
                     <textarea class="form-control" id="motivo" name="motivo" maxlength="500" rows="2" required></textarea>
@@ -215,7 +220,7 @@ $claveNueva = ajuste_uuid();
                     <td><span class="badge text-bg-<?= $ajuste['estado'] === 'CONFIRMADO' ? 'success' : 'secondary' ?>"><?= ajuste_h($ajuste['estado']) ?></span></td>
                     <td><?= $ajuste['tipo_movimiento'] === 'AJUSTE_POSITIVO' ? 'Positivo' : 'Negativo' ?></td>
                     <td><?= ajuste_h($ajuste['bodega']) ?></td>
-                    <td><?= ajuste_h($ajuste['producto']) ?><br><?= ajuste_h($ajuste['cantidad_base']) ?></td>
+                    <td><?= ajuste_h($ajuste['producto']) ?><br><small class="text-body-secondary">Contenido: <?= ajuste_h($ajuste['contenido'] ?: 'Sin especificar') ?> · Tipo/categoría: <?= ajuste_h($ajuste['categoria'] ?: 'Sin categoría') ?></small><br><?= ajuste_h($ajuste['cantidad_base']) ?></td>
                     <td><?= ajuste_h($ajuste['observaciones']) ?></td>
                     <td><?= ajuste_h($ajuste['creador']) ?><?php if ($ajuste['confirmador']): ?><br><small>Confirmó: <?= ajuste_h($ajuste['confirmador']) ?></small><?php endif; ?></td>
                     <td><?php if ($ajuste['estado'] === 'BORRADOR'): ?><form method="post">
@@ -230,5 +235,6 @@ $claveNueva = ajuste_uuid();
         </section>
     <?php endif; ?>
 </main>
+<script src="/assets/brand.js" defer></script>
 </body>
 </html>

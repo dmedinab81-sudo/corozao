@@ -40,13 +40,12 @@ function corozao_pedidos_instalados(PDO $pdo): bool
 function corozao_pedido_cantidad(string $valor): string
 {
     $valor = trim($valor);
-    if (!preg_match('/^(?:0|[1-9][0-9]{0,10})(?:\.[0-9]{1,3})?$/', $valor)
-        || trim(str_replace(['0', '.'], '', $valor)) === '') {
-        throw new DomainException('La cantidad debe ser positiva y tener hasta tres decimales.');
+    // MySQL devuelve DECIMAL(…,3) como "1.000". Aceptamos esa
+    // representación histórica solo si la parte fraccionaria es cero.
+    if (!preg_match('/^([1-9][0-9]{0,10})(?:\.0{1,3})?$/', $valor, $coincidencia)) {
+        throw new DomainException('La cantidad debe ser un número entero positivo.');
     }
-    [$entero, $fraccion] = array_pad(explode('.', $valor, 2), 2, '');
-    $entero = ltrim($entero, '0');
-    return ($entero === '' ? '0' : $entero) . '.' . str_pad($fraccion, 3, '0');
+    return $coincidencia[1] . '.000';
 }
 
 function corozao_pedido_decimal_exacto(string $valor, int $escalaOrigen, int $escalaDestino, int $maxEnteros): string
@@ -64,8 +63,8 @@ function corozao_pedido_decimal_exacto(string $valor, int $escalaOrigen, int $es
 
 function corozao_pedido_validar_entradas(array $entradas): array
 {
-    if (count($entradas) > 10) {
-        throw new DomainException('Cada pedido admite hasta diez presentaciones.');
+    if (count($entradas) > 100) {
+        throw new DomainException('Cada pedido admite hasta cien presentaciones.');
     }
     $limpias = [];
     foreach ($entradas as $entrada) {
@@ -104,13 +103,18 @@ function corozao_pedido_validar_entradas(array $entradas): array
 function corozao_pedido_snapshot_detalles(PDO $pdo, int $pedidoId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT d.producto_id, p.nombre AS producto, d.presentacion_id, pr.nombre AS presentacion,
+        'SELECT d.producto_id, p.nombre AS producto, p.marca, p.contenido, p.unidad_base,
+                c.nombre AS categoria,
+                (SELECT GROUP_CONCAT(DISTINCT pc.codigo ORDER BY pc.codigo) FROM producto_codigos pc
+                 WHERE pc.presentacion_id = d.presentacion_id) AS codigos,
+                d.presentacion_id, pr.nombre AS presentacion,
                 d.precio_bodega_id, d.cantidad_presentacion, d.unidades_base, d.cantidad_base,
                 d.precio_unitario_presentacion, d.precio_incluye_iva, d.tarifa_iva, d.subtotal_linea,
                 d.usuario_agrega_id
          FROM pedido_detalles d
          INNER JOIN productos p ON p.producto_id = d.producto_id
          INNER JOIN presentaciones pr ON pr.presentacion_id = d.presentacion_id
+         LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
          WHERE d.pedido_id = :pedido ORDER BY d.producto_id, d.presentacion_id'
     );
     $stmt->execute(['pedido' => $pedidoId]);
