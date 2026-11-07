@@ -209,11 +209,9 @@ function corozao_fecha_operativa_local(): string
     return (new DateTimeImmutable('now', new DateTimeZone('America/Guayaquil')))->format('Y-m-d');
 }
 
-function corozao_fecha_caja_es_hoy(?string $fechaCaja, string $hoy): bool
+function corozao_caja_supera_ventana_ventas(int $segundosAbierta): bool
 {
-    return $fechaCaja !== null
-        && preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaCaja) === 1
-        && hash_equals($hoy, $fechaCaja);
+    return $segundosAbierta >= 24 * 60 * 60;
 }
 
 function corozao_dinero_centavos(string $valor, bool $permitirCero = true): int
@@ -529,18 +527,17 @@ function corozao_venta_confirmar_fuente(PDO $pdo, ?int $pedidoId, int $bodegaId,
             $stmt->execute(['bodega' => $bodegaId]);
             if (!$stmt->fetchColumn()) throw new DomainException('La bodega seleccionada ya no está activa.');
         }
-        $fechaCajaSelect = corozao_caja_fecha_operativa_instalada($pdo)
-            ? 'fecha_operativa' : 'NULL AS fecha_operativa';
         $stmt = $pdo->prepare(
-            'SELECT caja_id, bodega_id, ' . $fechaCajaSelect . ' FROM cajas
+            'SELECT caja_id, bodega_id,
+                    TIMESTAMPDIFF(SECOND, fecha_apertura, CURRENT_TIMESTAMP(6)) AS segundos_abierta
+             FROM cajas
              WHERE usuario_id = :usuario AND estado = \'ABIERTA\' AND bodega_id = :bodega FOR UPDATE'
         );
         $stmt->execute(['usuario' => $usuarioId, 'bodega' => $bodegaId]);
         $caja = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$caja) throw new DomainException('Abre una caja para la bodega del pedido antes de cobrar.');
-        if (corozao_caja_fecha_operativa_instalada($pdo)
-            && !corozao_fecha_caja_es_hoy($caja['fecha_operativa'] === null ? null : (string)$caja['fecha_operativa'], corozao_fecha_operativa_local())) {
-            throw new DomainException('La caja pertenece a una fecha operativa anterior. Ciérrala y abre una nueva para continuar cobrando.');
+        if (corozao_caja_supera_ventana_ventas((int)$caja['segundos_abierta'])) {
+            throw new DomainException('La caja superó sus 24 horas de operación. Ciérrala antes de registrar nuevos cobros.');
         }
         $lineas = [];
         if ($pedidoId !== null) {

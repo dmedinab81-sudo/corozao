@@ -137,14 +137,14 @@ El sistema registra quién creó el pedido y quién realizó cambios relevantes.
 
 En **Ventas y caja** (`/ventas.php`), el cajero:
 
-1. Abre una caja para la bodega del pedido e ingresa el fondo inicial. La caja debe corresponder a la fecha operativa actual.
+1. Abre una caja para la bodega del pedido e ingresa el fondo inicial. La caja permanece habilitada para cobros durante 24 horas desde su apertura, incluso si el turno cruza la medianoche.
 2. Selecciona un pedido **PENDIENTE_FACTURACION** y revisa el detalle y total calculado por el sistema.
 3. Ingresa un descuento como valor monetario fijo, si corresponde. No se ingresa como porcentaje y no puede superar el total.
 4. Elige entre consumidor final o registrar datos para una factura. Si registra factura, completa tipo e identificación y nombre; los datos opcionales se validan cuando se ingresan.
 5. Registra uno o varios pagos entre efectivo, transferencia y tarjeta de crédito. La suma debe ser igual al total después del descuento. Agrega referencia cuando corresponda.
 6. Confirma el cobro.
 
-El sistema descuenta existencias, registra venta, pagos, movimiento y auditoría como una operación atómica. Un pedido facturado no vuelve a cobrarse.
+El sistema descuenta existencias, registra venta, pagos, movimiento y auditoría como una operación atómica. Un pedido facturado no vuelve a cobrarse. Al cumplir 24 horas, la caja deja de aceptar cobros y debe cerrarse antes de continuar.
 
 ### Facturación electrónica y SRI
 
@@ -186,7 +186,7 @@ En el filtro de usuario del bloque de devoluciones, el usuario corresponde a qui
 - **No aparece una bodega:** solicita al administrador que revise la asignación de tu usuario y que la bodega esté activa.
 - **Un producto no se puede añadir al pedido:** revisa estado activo, validación comercial, habilitación en la bodega, precio vigente y tarifa de IVA.
 - **No se puede confirmar una compra o transferencia:** revisa que los productos estén activos y que el saldo alcance en la bodega de origen.
-- **No puedes cobrar:** verifica estado del pedido, caja abierta en la bodega correcta, fecha operativa, precios y existencias.
+- **No puedes cobrar:** verifica estado del pedido, caja abierta en la bodega correcta, que no haya superado las 24 horas desde su apertura, precios y existencias.
 - **No se aprueba un reembolso:** abre caja en la bodega de la venta; para reembolso efectivo, verifica el efectivo disponible; registra referencia para transferencia o tarjeta.
 - **No se permite cargar inventario inicial:** esa línea ya tiene saldo o historial, el teórico no era cero, el físico no es positivo o la bodega/producto está inactivo. No fuerces el proceso; usa el procedimiento administrativo apropiado y auditado.
 - Las ventas, compras, transferencias, ajustes, cargas y devoluciones confirmadas conservan su historial. Las correcciones deben usar un procedimiento autorizado; no borres filas ni modifiques directamente saldos o movimientos.

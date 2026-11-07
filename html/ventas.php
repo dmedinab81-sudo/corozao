@@ -31,7 +31,6 @@ if (!is_string($csrf) || strlen($csrf) < 32) { $csrf = bin2hex(random_bytes(32))
 $error = null;
 $listo = false;
 $conciliacionLista = false;
-$fechaOperativaLista = false;
 $devolucionesLista = false;
 $ventasDirectasLista = false;
 $cajaMejorasLista = false;
@@ -53,8 +52,6 @@ catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de vent
 if ($listo) {
     try { $conciliacionLista = corozao_caja_conciliacion_instalada($pdo); }
     catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de conciliación.'); }
-    try { $fechaOperativaLista = corozao_caja_fecha_operativa_instalada($pdo); }
-    catch (Throwable $e) { error_log('Corozao: no se pudo validar la fecha operativa de caja.'); }
     try { $devolucionesLista = corozao_devoluciones_instaladas($pdo); }
     catch (Throwable $e) { error_log('Corozao: no se pudo validar el esquema de devoluciones.'); }
     try { $ventasDirectasLista = corozao_ventas_directas_instaladas($pdo); }
@@ -165,7 +162,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $listo) {
 
 if ($listo) {
     try {
-        $stmt = $pdo->prepare('SELECT c.*, b.nombre AS bodega FROM cajas c INNER JOIN bodegas b ON b.bodega_id = c.bodega_id WHERE c.usuario_id = :usuario AND c.estado = \'ABIERTA\' ORDER BY c.fecha_apertura DESC');
+        $stmt = $pdo->prepare('SELECT c.*, b.nombre AS bodega,
+            TIMESTAMPDIFF(SECOND,c.fecha_apertura,CURRENT_TIMESTAMP(6)) AS segundos_abierta
+            FROM cajas c INNER JOIN bodegas b ON b.bodega_id = c.bodega_id
+            WHERE c.usuario_id = :usuario AND c.estado = \'ABIERTA\' ORDER BY c.fecha_apertura DESC');
         $stmt->execute(['usuario' => (int) $usuario['usuario_id']]); $cajas = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($cajas as $cajaAbierta) $resumenesCaja[(int)$cajaAbierta['caja_id']] = corozao_caja_resumen($pdo, (int)$cajaAbierta['caja_id']);
         if ($cajaMejorasLista && corozao_rol_puede((string)$usuario['rol'], 'cash.movements.manage')) {
@@ -239,12 +239,11 @@ if ($listo && $ventaId) {
 <?php if ($error): ?><div class="alert alert-danger" role="alert"><?= venta_h($error) ?></div><?php endif; ?>
 <?php if ($listo && corozao_rol_puede((string)$usuario['rol'], 'sales.direct.create') && !$pedidoCobrar && $ventasDirectasLista): ?><p><a class="btn btn-outline-primary" href="/ventas.php?directa=1">Iniciar venta directa</a></p><?php endif; ?>
 <?php if (!$listo): ?><div class="alert alert-warning">El módulo aún no está habilitado. Aplica manualmente <code>migrations/20261026_ventas_caja.sql</code>; esta página no ejecuta migraciones.</div><?php else: ?>
-<?php if (!$fechaOperativaLista): ?><div class="alert alert-warning" role="status">El cierre diario por fecha local aún no está activo. Aplica manualmente <code>migrations/20261027_fecha_operativa_caja.sql</code>; las cajas actuales no se modifican.</div><?php endif; ?>
 <?php if (!$devolucionesLista): ?><div class="alert alert-warning" role="status">Las devoluciones aún no están activas. Aplica manualmente <code>migrations/20261028_devoluciones.sql</code>; esta página no ejecuta migraciones.</div><?php endif; ?>
 <?php if (!$ventasDirectasLista && corozao_rol_puede((string)$usuario['rol'], 'sales.direct.create')): ?><div class="alert alert-warning" role="status">La venta directa requiere las migraciones <code>20261101_ventas_directas.sql</code> y <code>20261103_referencia_cliente_ventas.sql</code>. La venta directa permanece deshabilitada hasta instalarlas; no se ejecutan migraciones desde esta página.</div><?php endif; ?>
 <?php if (!$cajaMejorasLista): ?><div class="alert alert-warning" role="status">Cobro de efectivo recibido/cambio, movimientos autorizados y revisión administrativa requieren aplicar manualmente <code>migrations/20261106_caja_cobros_revision.sql</code>. Los cobros mantienen el modo anterior hasta entonces.</div><?php endif; ?>
 <?php if ($venta): ?><section class="alert alert-success"><h2 class="h5">Venta #<?= (int) $venta['venta_id'] ?> registrada</h2><p class="mb-1">Total cobrado: $<?= venta_h($venta['total']) ?> · Descuento fijo: $<?= venta_h($venta['descuento_valor']) ?></p><p>Destinatario: <?= venta_h($venta['nombre_destinatario']) ?> · Estado de estructura electrónica: <?= venta_h($venta['estado_factura'] ?? 'PENDIENTE') ?>. No se ha generado ni enviado un comprobante al SRI.</p><a class="btn btn-primary" target="_blank" rel="noopener" href="/comprobante_venta.php?venta=<?= (int)$venta['venta_id'] ?>">Imprimir comprobante interno</a></section><?php endif; ?>
-<?php if ($listo && $fechaOperativaLista): foreach ($cajas as $caja): $fechaCaja = $caja['fecha_operativa'] === null ? null : (string)$caja['fecha_operativa']; if (!corozao_fecha_caja_es_hoy($fechaCaja, corozao_fecha_operativa_local())): ?><div class="alert alert-warning" role="alert">La caja #<?= (int)$caja['caja_id'] ?> de <?= venta_h($caja['bodega']) ?> pertenece a <?= venta_h($fechaCaja ?? 'una fecha histórica sin etiqueta') ?>. No admite nuevos cobros; ciérrala y abre una caja para el día actual.</div><?php endif; endforeach; endif; ?>
+<?php foreach ($cajas as $caja): if (corozao_caja_supera_ventana_ventas((int)$caja['segundos_abierta'])): ?><div class="alert alert-warning" role="alert">La caja #<?= (int)$caja['caja_id'] ?> de <?= venta_h($caja['bodega']) ?> superó las 24 horas desde su apertura. No admite nuevos cobros; ciérrala para continuar.</div><?php endif; endforeach; ?>
 <section class="card shadow-sm mb-4">
 <div class="card-header"><h2 class="h5 mb-0">Mis cajas abiertas</h2></div><div class="card-body">
 <?php if (!$cajas): ?><p class="text-body-secondary">No tienes una caja abierta.</p><form method="post" class="row g-3"><input type="hidden" name="csrf_token" value="<?= venta_h($csrf) ?>"><input type="hidden" name="accion" value="abrir_caja"><div class="col-12 col-md-6"><label class="form-label" for="bodega">Bodega</label><select class="form-select" id="bodega" name="bodega_id" required><option value="">Selecciona</option><?php foreach ($bodegas as $b): ?><option value="<?= (int)$b['bodega_id'] ?>"><?= venta_h($b['nombre']) ?></option><?php endforeach; ?></select></div><div class="col-12 col-md-4"><label class="form-label" for="monto-apertura">Fondo inicial de efectivo</label><input class="form-control" type="number" min="0" step="0.01" id="monto-apertura" name="monto_apertura" value="0.00" required></div><div class="col-12 col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100" type="submit">Abrir caja</button></div></form>
